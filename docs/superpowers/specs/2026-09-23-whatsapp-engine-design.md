@@ -14,7 +14,8 @@ v1 succeeds when one pilot client is live:
 - Their customers chat 1:1 with the client's official WhatsApp number and get correct answers.
 - Their groups get answers from a purchased "persona" number when someone @mentions it.
 - Answers draw on business knowledge, the client's Google Sheet and recent group history.
-- The bot adds Sheet rows only after a YES.
+- Totals and counts ("expenses in June", "perfumes sold this month") are computed by code, not the model.
+- Customer rows are added only after a YES. Staff rows (e.g. logging an expense) save at once.
 - Voice notes are understood.
 
 ## 2. Constraints (verified 2026-09-23; re-check before launch)
@@ -36,7 +37,8 @@ v1 succeeds when one pilot client is live:
   - the client's official number (Cloud API) for customer 1:1 chats
   - the persona number (WAHA) for groups and staff 1:1 chats
 - Knowledge in the prompt, loaded from a "Knowledge" Sheet tab
-- Sheet lookups scoped by role, and Sheet appends that need a YES
+- Sheet lookups and totals scoped by role
+- Sheet appends: customers confirm with YES, staff save at once
 - Group history as context
 - Voice-note transcription
 - Handoff to staff, AI disclosure, message retention
@@ -76,10 +78,14 @@ Group / staff → WAHA           → POST /webhooks/waha ┴→ Incoming → bot
 5. **Build the context.**
    - The system prompt contains: persona, rules, the tabs this role may use, current date/time in the client's timezone, business instructions, and the Knowledge tab text (cached for 5 minutes).
    - The chat's last 50 messages follow, with sender names in groups.
-6. **Tool loop.** Up to 4 model calls. Tools: `lookup_rows(tab, query)`, `propose_row(tab, values)`, `handoff(reason)`.
+6. **Tool loop.** Up to 4 model calls. Tools:
+   - `lookup_rows(tab, query)`
+   - `total_rows(tab, date_column, from_date, to_date, sum_column, group_by, match)`: code counts and adds. Rows whose date or number can't be read are reported, not dropped. At most 30 groups.
+   - `propose_row(tab, values)`
+   - `handoff(reason)`
 7. **Code-composed replies.** These texts are always composed by code, never by the model:
-   - Write proposals: "Add to Orders: …? Reply YES to confirm."
-   - Write results: "✅ Added to Orders", sent only after the Sheets API succeeds.
+   - Write proposals to customers: "Add to Orders: …? Reply YES to confirm."
+   - Write results: "✅ Added to Orders" after a customer's YES, and "✅ Saved to Expenses: …" for a staff write. Both are sent only after the Sheets API succeeds.
    - Handoff acknowledgements.
    - The AI-disclosure intro on the bot's first message in a chat.
 8. **Send** the reply through the incoming channel and store it. In groups, the reply quotes the message that triggered it.
@@ -95,7 +101,9 @@ Group / staff → WAHA           → POST /webhooks/waha ┴→ Incoming → bot
   - `own`: only rows whose `owner_column` equals the sender's phone
   - `append`: may propose new rows
 - **Customers in groups** get only `read` tabs. `own` and `append` work in private chats only, so one customer's orders and phone number are never shown to a whole group.
-- **Staff** may `read` and `append` on every configured tab.
+- **Staff** may `read` and `append` on every configured tab. Staff rows are saved at once; customer rows wait for YES.
+- **Totals** see exactly the rows a lookup would see.
+- **Dates.** The bot writes dates as `YYYY-MM-DD`. Dates typed into the Sheet by hand are read with the client's `date_format` (e.g. `%d/%m/%Y`).
 - **Customer appends** have their `fill` columns set by code from the sender (e.g. `Name` ← WhatsApp name, `Phone` ← phone).
 - **Hidden phone numbers.** If the phone is hidden (username user):
   - `own` lookups are refused, and the model offers a handoff.
@@ -145,7 +153,7 @@ Group / staff → WAHA           → POST /webhooks/waha ┴→ Incoming → bot
   - Bot pipeline tests with a scripted fake model: reply/no-reply rules, mention, propose → YES / NO / expiry, handoff, intro, loop breaker, voice note, model failure.
   - API tests with FastAPI's TestClient.
   - The OpenAI SDK wrapper, tested through `httpx.MockTransport`.
-- **Model choice.** An eval runner plays 13 scripted chats against each candidate provider/model, with more added from real pilot chats. It costs money and is run manually. The default model is the cheapest one that passes every case.
+- **Model choice.** An eval runner plays 15 scripted chats against each candidate provider/model, with more added from real pilot chats. It costs money and is run manually. The default model is the cheapest one that passes every case.
 - **Manual smoke test:** a Meta test number, plus a WAHA session on the purchased number.
 
 ## 11. Decisions log (owner decisions in brainstorming — do not re-litigate)
@@ -157,6 +165,8 @@ Group / staff → WAHA           → POST /webhooks/waha ┴→ Incoming → bot
 - **AI providers:** Ollama Cloud, Gemini or OpenAI. The engine supports all three via `base_url`; the default is chosen by eval.
 - **Approach:** A, a Python service + WAHA.
 - **Voice notes:** in v1.
+- **Totals:** a `total_rows` tool where code does the counting and adding, for use cases like "expenses in June" and "perfumes sold this month". Business records stay in Sheet tabs; there are no database tables for them in v1.
+- **Staff writes:** saved at once, with a reply showing what was saved. Customers still confirm with YES.
 
 ## 12. Amendments during planning (2026-09-23, from API research)
 
@@ -171,3 +181,5 @@ Group / staff → WAHA           → POST /webhooks/waha ┴→ Incoming → bot
 - **Permission refinements** (section 6): groups are decided by the group; customers in groups get `read` tabs only; a hidden-phone customer can type a number to complete an order.
 - **Group intro on join** (section 7).
 - **Sheets:** appends use `RAW` input, so text sent from chat can never run as a formula.
+- **Tooling (from the plan dry run):** ruff runs with an explicit rule set (`E4, E7, E9, F`), because ruff 0.16 widened its defaults. The openai SDK floor is `>=3.19`, the version the dry run passed on.
+- **Totals and staff writes** (owner decisions after the plan was written): the `total_rows` tool (section 5), staff rows saving at once (section 6), and the client's `date_format` for dates typed in by hand.
