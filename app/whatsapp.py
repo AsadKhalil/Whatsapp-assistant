@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import hashlib
 import hmac
+import re
 from collections.abc import Mapping
 from dataclasses import dataclass
 
@@ -75,7 +76,7 @@ def parse_meta(payload: dict, by_phone_number_id: dict[str, Client]) -> list[Inc
                 kind = META_KINDS.get(msg.get("type", ""))
                 phone = digits(msg.get("from")) or None
                 user = msg.get("from_user_id") or phone
-                if kind is None or not user:
+                if kind is None or not user or not msg.get("id"):
                     continue
                 out.append(Incoming(
                     client_id=client.id, channel="meta", msg_id=msg["id"], chat_id=user, address=phone or user,
@@ -149,7 +150,7 @@ def parse_waha(envelope: dict, by_session: dict[str, Client]) -> Incoming | Grou
     mentioned = {_user(_jid(v)) for key, value in _walk(raw)
                  if key in MENTION_KEYS and isinstance(value, list) for v in value}
     reply = p.get("replyTo") or {}
-    addressed = (bool(bot & mentioned) or any(f"@{u}" in body for u in bot)
+    addressed = (bool(bot & mentioned) or any(re.search(rf"@{re.escape(u)}(?!\d)", body) for u in bot)
                  or _user(reply.get("participant")) in bot)
     name = next((v for key, v in _walk(raw) if key in NAME_KEYS and isinstance(v, str) and v), "")
     alt = next((v for key, v in _walk(raw) if key == "SenderAlt" and isinstance(v, str)), None)

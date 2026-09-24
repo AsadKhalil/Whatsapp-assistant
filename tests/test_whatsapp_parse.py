@@ -58,6 +58,9 @@ def test_meta_statuses_reactions_and_unknown_numbers_are_ignored():
     msg.pop("text")
     assert parse_meta(reaction, BY_PHONE) == []
     assert parse_meta(meta_text(), {}) == []
+    no_id = meta_text()
+    first_message(no_id).pop("id")
+    assert parse_meta(no_id, BY_PHONE) == []
 
 
 def test_waha_group_mention_is_detected_through_the_bots_lid():
@@ -75,6 +78,7 @@ def test_waha_mention_in_the_body_only_still_counts():
 
 def test_waha_group_message_without_mention_is_not_addressed():
     assert parse_waha(waha_message("just chatting", mentioned=()), BY_SESSION).mentions_bot is False
+    assert parse_waha(waha_message("@999900001234 hi", mentioned=()), BY_SESSION).mentions_bot is False
 
 
 def test_waha_mention_inside_a_quoted_message_does_not_count():
