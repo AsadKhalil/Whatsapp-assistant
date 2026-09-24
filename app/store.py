@@ -103,7 +103,8 @@ class Store:
         if not rows:
             return None
         if rows[0]["expires_at"] <= now:
-            self.drop_pending(client_id, chat_id, sender_id)
+            self._write("DELETE FROM pending_writes WHERE client_id = ? AND chat_id = ? AND sender_id = ?"
+                        " AND expires_at <= ?", (client_id, chat_id, sender_id, now))
             return None
         return rows[0]["tab"], json.loads(rows[0]["row_json"])
 
