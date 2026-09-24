@@ -1,0 +1,36 @@
+# One entry per business. Copy to clients.yaml (git-ignored) and edit.
+# Tab access for customers: read = all rows, own = rows whose owner_column matches their phone,
+# append = may propose new rows. Staff may read and append on every tab listed here.
+# fill: columns the engine sets from the customer's WhatsApp profile (name or phone) on customer appends.
+# Tabs with no customer access (like Expenses) are staff-only. Staff rows are saved at once; customers confirm with YES.
+# date_format: how dates typed into the Sheet by hand look (the bot itself writes YYYY-MM-DD).
+clients:
+  sweetbakes:
+    business: Sweet Bakes
+    bot_name: Sara
+    timezone: Asia/Karachi
+    date_format: "%d/%m/%Y"
+    instructions: |
+      We are a home bakery in Lahore. Cakes need 24 hours notice.
+      Delivery is free above Rs 3000. Be warm and brief.
+    sheet_id: 1AbCdEfGhIjKlMnOpQrStUvWxYz0123456789
+    knowledge_tab: Knowledge
+    handoff_tab: Handoffs
+    meta_phone_number_id: "106540352242922"
+    waha_session: sweetbakes
+    staff_chats: ["120363041234567890@g.us"]
+    staff_numbers: ["+92 300 1111111"]
+    staff_alert_chat: "120363041234567890@g.us"
+    retention_days: 90
+    tabs:
+      Prices: {customer: [read]}
+      Stock: {customer: [read]}
+      Orders:
+        customer: [own, append]
+        owner_column: Phone
+        fill: {Name: name, Phone: phone}
+      Leads:
+        customer: [append]
+        fill: {Name: name, Phone: phone}
+      Expenses: {}
+      Handoffs: {}
