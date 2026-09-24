@@ -4,10 +4,13 @@ from __future__ import annotations
 import hashlib
 import hmac
 import re
-from collections.abc import Mapping
+import time
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 
-from app.config import Client, digits
+import httpx
+
+from app.config import Client, Settings, digits
 
 # Meta message types; anything not listed (reaction, system, request_welcome, ...) is ignored.
 META_KINDS = {"text": "text", "audio": "audio", **{t: "unsupported" for t in (
@@ -160,3 +163,83 @@ def parse_waha(envelope: dict, by_session: dict[str, Client]) -> Incoming | Grou
         kind=kind, text=body if kind == "text" else "", audio=media.get("url") if kind == "audio" else None,
         reply_to=reply.get("id"), mentions_bot=addressed, from_me=bool(p.get("fromMe")),
     )
+
+
+class SendError(Exception):
+    """A message was not delivered; the text carries the provider's status and error code."""
+
+
+def _meta_error_code(response: httpx.Response) -> int | None:
+    try:
+        return (response.json().get("error") or {}).get("code")
+    except ValueError:
+        return None
+
+
+class MetaClient:
+    def __init__(self, settings: Settings, http: httpx.Client, sleep: Callable[[float], None] = time.sleep) -> None:
+        self._http = http
+        self._sleep = sleep
+        self._base = f"https://graph.facebook.com/{settings.meta_graph_version}"
+        self._auth = {"Authorization": f"Bearer {settings.meta_access_token}"}
+
+    def send_text(self, phone_number_id: str, to: str, text: str, reply_to: str | None = None) -> str | None:
+        body: dict = {"messaging_product": "whatsapp", "recipient_type": "individual", "type": "text",
+                      "text": {"body": text}}
+        body["to" if to.isdigit() else "recipient"] = to  # username users only have a BSUID
+        if reply_to:
+            body["context"] = {"message_id": reply_to}
+        url = f"{self._base}/{phone_number_id}/messages"
+        r = self._http.post(url, json=body, headers=self._auth)
+        if r.status_code == 429 or (r.status_code >= 400 and _meta_error_code(r) == 130429):
+            self._sleep(2)
+            r = self._http.post(url, json=body, headers=self._auth)
+        if r.status_code >= 400:
+            raise SendError(f"meta status={r.status_code} code={_meta_error_code(r)}")
+        return ((r.json().get("messages") or [{}])[0]).get("id")
+
+    def download(self, media_id: str) -> bytes:
+        info = self._http.get(f"{self._base}/{media_id}", headers=self._auth)
+        info.raise_for_status()
+        media = self._http.get(info.json()["url"], headers=self._auth)  # the URL expires after 5 minutes
+        media.raise_for_status()
+        return media.content
+
+
+def _waha_id(data: dict) -> str | None:
+    value = data.get("id")
+    if isinstance(value, dict):  # WEBJS shape
+        value = value.get("_serialized") or value.get("id")
+    return str(value) if value else None
+
+
+class WahaClient:
+    def __init__(self, settings: Settings, http: httpx.Client) -> None:
+        self._http = http
+        self._base = settings.waha_url.rstrip("/")
+        self._auth = {"X-Api-Key": settings.waha_api_key}
+
+    def send_text(self, session: str, chat_id: str, text: str, reply_to: str | None = None) -> str | None:
+        body = {"session": session, "chatId": chat_id, "text": text}
+        if reply_to:
+            body["reply_to"] = reply_to
+        try:
+            r = self._http.post(f"{self._base}/api/sendText", json=body, headers=self._auth)
+        except httpx.HTTPError as e:
+            raise SendError(f"waha unreachable: {type(e).__name__}") from e
+        if r.status_code >= 400:
+            raise SendError(f"waha status={r.status_code}")
+        return _waha_id(r.json())
+
+    def download(self, url: str) -> bytes:
+        r = self._http.get(url, headers=self._auth)
+        r.raise_for_status()
+        return r.content
+
+    def status(self, session: str) -> str:
+        try:
+            r = self._http.get(f"{self._base}/api/sessions/{session}", headers=self._auth)
+            r.raise_for_status()
+            return str(r.json().get("status", "UNKNOWN"))
+        except (httpx.HTTPError, ValueError):
+            return "UNREACHABLE"
