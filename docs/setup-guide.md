@@ -344,13 +344,7 @@ These go in `.env` (created properly in Part E). From `.env.example`:
      ```bash
      git clone https://<your-token>@github.com/AsadKhalil/Whatsapp-assistant.git
      ```
-   - If the engine code hasn't been merged into `main` yet, clone the feature branch instead:
-     ```bash
-     git clone -b feat/whatsapp-engine https://github.com/AsadKhalil/Whatsapp-assistant.git
-     ```
-     (After cloning, run `ls` — if you see an `app` folder and a `docker-compose.yml`, you have the right
-     branch. If you only see docs, the engine hasn't been merged into what you cloned yet; re-clone with
-     `-b feat/whatsapp-engine` as above.)
+   - You should see (after `ls Whatsapp-assistant`): an `app` folder, `docker-compose.yml` and `README.md`.
    ```bash
    cd Whatsapp-assistant
    ```
