@@ -25,6 +25,8 @@ the SQLite connection live in one process.
 
 ## One-time setup for a pilot client
 
+New to servers? Follow the step-by-step [setup guide](docs/setup-guide.md).
+
 ### 1. Google Sheet
 1. In Google Cloud, create a project, enable the **Google Sheets API**, and create a **service account**. Download its JSON key to `secrets/google-service-account.json`.
 2. Share the client's Sheet with the service account's email as **Editor**.
