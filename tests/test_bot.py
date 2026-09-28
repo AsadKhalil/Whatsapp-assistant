@@ -46,6 +46,8 @@ def test_joining_a_group_posts_the_intro_once():
                                "I read messages here so I can answer when you @mention me."]
     bot.handle(incoming("@Sara price?", group="fam@g.us", mention=True))
     assert texts(bot.waha)[-1] == "Rs 2500"
+    bot.waha.fail = RuntimeError("WAHA answered with junk")
+    bot.greet("acme", "other@g.us")  # logged by the bot, never raised into the background task
 
 
 def test_own_messages_are_stored_not_answered():

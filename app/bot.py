@@ -89,10 +89,13 @@ class Bot:
 
     def greet(self, client_id: str, chat_id: str) -> None:
         """Introduce the bot when it joins a group, so members know an AI reads the chat."""
-        client = self.clients[client_id]
         with self._chat_locks[f"{client_id}:{chat_id}"]:
-            if not self.store.bot_has_spoken(client.id, chat_id):
-                self._deliver(client, "waha", chat_id, chat_id, intro(client, is_group=True))
+            try:
+                client = self.clients[client_id]
+                if not self.store.bot_has_spoken(client.id, chat_id):
+                    self._deliver(client, "waha", chat_id, chat_id, intro(client, is_group=True))
+            except Exception:
+                log.exception("greet_failed client=%s chat=%s", client_id, self._h(chat_id))
 
     def _handle(self, m: Incoming) -> None:
         client = self.clients[m.client_id]
