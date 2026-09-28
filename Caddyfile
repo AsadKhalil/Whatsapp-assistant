@@ -1,0 +1,10 @@
+{$DOMAIN} {
+	@public path /webhooks/meta /health
+	handle @public {
+		request_body {
+			max_size 1MB
+		}
+		reverse_proxy engine:8000
+	}
+	respond 404
+}

@@ -50,21 +50,22 @@
   - Up to 4 model calls per message
   - 50 history messages
   - Pending writes expire after 600 s
-  - At most 6 bot replies per chat per 600 s
+  - At most 6 bot replies per chat per 600 s, for every reply the bot sends (model answers, confirmations and voice-note failures alike)
   - Voice notes over 1,000,000 bytes are refused
   - Lookups return at most 20 rows
   - Totals list at most 30 groups
 - Logs never contain message text. Chat ids are logged as a 12-character HMAC.
-- Commit after every task with the message given. Git identity: `git -c user.name="Jawad" -c user.email="jawad@thesolutioners.ca"`, unless the owner has configured git globally.
-- Run commands from the repo root `C:\Users\asadk\Downloads\whatsapp-assistant` (in bash: `/c/Users/asadk/Downloads/whatsapp-assistant`). Use `uv run` for everything.
+- Commit after every task with the message given, using the repository's configured git identity. If none is configured, set one first: `git config user.name "..."` and `git config user.email "..."`.
+- Run commands from the repo root `/Users/asad/Projects/whatsapp-assistant`. Use `uv run` for everything.
 
 ## Review Focus
 
 - Totals over messy Sheet data come out right: dates typed by hand as `15/06/2026`, amounts like `Rs 1,500`, blank cells. Unreadable rows are reported rather than silently dropped. Pinned in Task 5 (`test_totals_are_computed_in_code_by_date_and_category`).
 - If Google Sheets is down or a tab was renamed, the model gets an error result and the user still gets an answer. Pinned in Task 7 (`test_sheet_failure_reaches_the_model_as_an_error`).
 - Malformed tool arguments from cheaper models (e.g. `values` sent as a string) go back to the model as an error instead of crashing. Pinned in Task 8 (`test_malformed_tool_arguments_become_an_error_for_the_model`).
-- Webhooks that aren't messages are ignored with a 200: delivery statuses, reactions, WAHA session events, unknown numbers and sessions. Pinned in Task 3 (`test_meta_statuses_reactions_and_unknown_numbers_are_ignored`, `test_waha_direct_chat_image_own_message_join_and_unknown_session`) and Task 10 (`test_meta_webhook_checks_the_signature_and_queues_messages`).
+- Webhooks that aren't messages are ignored with a 200: delivery statuses, reactions, WAHA session events, unknown numbers and sessions — and bodies that fail to parse get a 200 too, once the signature is valid. Pinned in Task 3 (`test_meta_statuses_reactions_and_unknown_numbers_are_ignored`, `test_waha_direct_chat_image_own_message_join_and_unknown_session`) and Task 10 (`test_meta_webhook_checks_the_signature_and_queues_messages`, `test_signed_but_unparsable_bodies_still_get_a_200`).
 - A failed send (24-hour window closed, WAHA down) is not recorded as sent, and the next message still works. Pinned in Task 7 (`test_failed_send_is_not_stored_and_the_next_message_still_works`).
+- Every reply the bot sends obeys the loop breaker, code-composed ones included: a flood of oversized voice notes must not buy a paid reply per note. Pinned in Task 9 (`test_voice_note_failures_obey_the_burst_limit`).
 
 ---
 
@@ -138,7 +139,7 @@ select = ["E4", "E7", "E9", "F"]  # explicit, so a new ruff release can't change
 package = false
 ```
 
-`tzdata` is there because Windows has no system time-zone database, so `zoneinfo` needs it for local test runs.
+`tzdata` bundles the IANA time-zone database, so `zoneinfo` works on every host and in the slim Docker image.
 
 `.python-version`:
 ```
@@ -465,7 +466,7 @@ Expected: PASS (8 passed)
 
 ```bash
 git add pyproject.toml uv.lock .python-version .env.example clients.example.yaml app/__init__.py app/config.py tests/__init__.py tests/fakes.py tests/test_config.py
-git -c user.name="Jawad" -c user.email="jawad@thesolutioners.ca" commit -m "chore: scaffold project, settings and client config"
+git commit -m "chore: scaffold project, settings and client config"
 ```
 
 ### Task 2: SQLite store
@@ -477,15 +478,16 @@ git -c user.name="Jawad" -c user.email="jawad@thesolutioners.ca" commit -m "chor
 **Interfaces:**
 - Consumes: nothing.
 - Produces: `app.store.Store(path: str)` with methods
-  - `save_message(client_id, channel, msg_id, chat_id, sender_id, sender_name, text, from_bot: bool, now: float) -> bool` (False when `(channel, msg_id)` is already stored)
-  - `set_text(channel, msg_id, text) -> None`
+  - `save_message(client_id, channel, msg_id, chat_id, sender_id, sender_name, text, from_bot: bool, now: float) -> bool` (False when `(client_id, channel, msg_id)` is already stored)
+  - `set_text(client_id, channel, msg_id, text) -> None`
   - `history(client_id, chat_id, limit: int) -> list[sqlite3.Row]` (oldest first; row keys `sender_name`, `text`, `from_bot`)
-  - `is_bot_message(channel, msg_id) -> bool`
+  - `is_bot_message(client_id, channel, msg_id) -> bool`
   - `bot_has_spoken(client_id, chat_id) -> bool`
   - `bot_replies_since(client_id, chat_id, since: float) -> int`
   - `put_pending(client_id, chat_id, sender_id, tab, row: dict[str, str], expires_at: float) -> None` (replaces any existing one)
   - `get_pending(client_id, chat_id, sender_id, now: float) -> tuple[str, dict[str, str]] | None` (deletes and returns None when expired)
   - `drop_pending(client_id, chat_id, sender_id) -> None`
+  - `purge_expired_pending(now: float) -> int`
   - `delete_older_than(client_id, cutoff: float) -> int`
   - `backup(dest: str) -> None`
   - `writable() -> bool`
@@ -508,11 +510,17 @@ def test_duplicate_deliveries_are_dropped_per_channel():
     assert save(s, "m1", channel="waha") is True
 
 
+def test_the_same_message_id_can_belong_to_two_clients():
+    s = Store(":memory:")
+    assert save(s, "m1") is True
+    assert s.save_message("other", "meta", "m1", "c1", "u1", "Ali", "hi", False, 100.0) is True
+
+
 def test_history_is_oldest_first_limited_and_updatable():
     s = Store(":memory:")
     for i in range(5):
         save(s, f"m{i}", text=f"t{i}", now=100.0 + i)
-    s.set_text("meta", "m4", "transcript")
+    s.set_text("acme", "meta", "m4", "transcript")
     rows = s.history("acme", "c1", limit=3)
     assert [r["text"] for r in rows] == ["t2", "t3", "transcript"]
     assert rows[0]["sender_name"] == "Ali" and rows[0]["from_bot"] == 0
@@ -524,8 +532,8 @@ def test_bot_message_lookups():
     assert s.bot_has_spoken("acme", "c1") is False
     save(s, "b1", sender="bot", from_bot=True, now=2.0)
     assert s.bot_has_spoken("acme", "c1") is True
-    assert s.is_bot_message("meta", "b1") is True
-    assert s.is_bot_message("meta", "u1") is False
+    assert s.is_bot_message("acme", "meta", "b1") is True
+    assert s.is_bot_message("acme", "meta", "u1") is False
     assert s.bot_replies_since("acme", "c1", since=1.5) == 1
     assert s.bot_replies_since("acme", "c1", since=2.5) == 0
 
@@ -538,6 +546,8 @@ def test_pending_write_round_trip_replace_and_expiry():
     assert s.get_pending("acme", "c1", "u1", now=150.0) == ("Leads", {"Name": "Ali"})
     assert s.get_pending("acme", "c1", "u1", now=300.0) is None
     assert s.get_pending("acme", "c1", "u1", now=0.0) is None  # the expired row was deleted
+    s.put_pending("acme", "c1", "u1", "Orders", {"Item": "x"}, expires_at=900.0)
+    assert s.purge_expired_pending(1000.0) == 1
     s.put_pending("acme", "c1", "u1", "Orders", {"Item": "x"}, expires_at=900.0)
     s.drop_pending("acme", "c1", "u1")
     assert s.get_pending("acme", "c1", "u1", now=0.0) is None
@@ -565,7 +575,7 @@ Expected: FAIL with `ModuleNotFoundError: No module named 'app.store'`
 
 `app/store.py`:
 ```python
-"""SQLite storage: messages (deduplicated per channel) and Sheet writes waiting for YES."""
+"""SQLite storage: messages (deduplicated per client and channel) and Sheet writes waiting for YES."""
 from __future__ import annotations
 
 import json
@@ -585,7 +595,7 @@ CREATE TABLE IF NOT EXISTS messages (
   text TEXT NOT NULL DEFAULT '',
   from_bot INTEGER NOT NULL DEFAULT 0,
   created_at REAL NOT NULL,
-  UNIQUE (channel, msg_id)
+  UNIQUE (client_id, channel, msg_id)
 );
 CREATE INDEX IF NOT EXISTS messages_by_chat ON messages (client_id, chat_id, created_at);
 CREATE TABLE IF NOT EXISTS pending_writes (
@@ -629,8 +639,9 @@ class Store:
             (client_id, channel, msg_id, chat_id, sender_id, sender_name, text, int(from_bot), now),
         ) == 1
 
-    def set_text(self, channel: str, msg_id: str, text: str) -> None:
-        self._write("UPDATE messages SET text = ? WHERE channel = ? AND msg_id = ?", (text, channel, msg_id))
+    def set_text(self, client_id: str, channel: str, msg_id: str, text: str) -> None:
+        self._write("UPDATE messages SET text = ? WHERE client_id = ? AND channel = ? AND msg_id = ?",
+                    (text, client_id, channel, msg_id))
 
     def history(self, client_id: str, chat_id: str, limit: int) -> list[sqlite3.Row]:
         rows = self._all(
@@ -640,9 +651,10 @@ class Store:
         )
         return rows[::-1]
 
-    def is_bot_message(self, channel: str, msg_id: str) -> bool:
+    def is_bot_message(self, client_id: str, channel: str, msg_id: str) -> bool:
         return bool(self._all(
-            "SELECT 1 FROM messages WHERE channel = ? AND msg_id = ? AND from_bot = 1", (channel, msg_id)))
+            "SELECT 1 FROM messages WHERE client_id = ? AND channel = ? AND msg_id = ? AND from_bot = 1",
+            (client_id, channel, msg_id)))
 
     def bot_has_spoken(self, client_id: str, chat_id: str) -> bool:
         return bool(self._all(
@@ -676,6 +688,9 @@ class Store:
         self._write("DELETE FROM pending_writes WHERE client_id = ? AND chat_id = ? AND sender_id = ?",
                     (client_id, chat_id, sender_id))
 
+    def purge_expired_pending(self, now: float) -> int:
+        return self._write("DELETE FROM pending_writes WHERE expires_at <= ?", (now,))
+
     def delete_older_than(self, client_id: str, cutoff: float) -> int:
         return self._write("DELETE FROM messages WHERE client_id = ? AND created_at < ?", (client_id, cutoff))
 
@@ -699,13 +714,13 @@ class Store:
 - [ ] **Step 4: Run the tests to verify they pass**
 
 Run: `uv run pytest tests/test_store.py -v`
-Expected: PASS (5 passed)
+Expected: PASS (6 passed)
 
 - [ ] **Step 5: Commit**
 
 ```bash
 git add app/store.py tests/test_store.py
-git -c user.name="Jawad" -c user.email="jawad@thesolutioners.ca" commit -m "feat: sqlite store for messages and pending writes"
+git commit -m "feat: sqlite store for messages and pending writes"
 ```
 
 ### Task 3: Webhook parsing and signature checks
@@ -726,6 +741,7 @@ git -c user.name="Jawad" -c user.email="jawad@thesolutioners.ca" commit -m "feat
     - `kind`: "text" | "audio" | "unsupported"
     - `text=""`
     - `audio: str | None`: Meta media id or WAHA media URL
+    - `audio_bytes: bytes | None = None`: the downloaded note, filled before per-chat processing starts
     - `reply_to: str | None`
     - `mentions_bot=False`, `from_me=False`
   - `app.whatsapp.GroupJoin(client_id, chat_id)` (frozen dataclass).
@@ -927,6 +943,9 @@ def test_waha_direct_chat_image_own_message_join_and_unknown_session():
     assert parse_waha(image, BY_SESSION).kind == "unsupported"
     assert parse_waha(waha_message(from_me=True), BY_SESSION).from_me is True
     assert parse_waha(waha_message("", mentioned=()), BY_SESSION) is None  # empty text, no media
+    no_id = waha_message("hi", chat="923001234567@c.us", mentioned=())
+    no_id["payload"]["id"] = None
+    assert parse_waha(no_id, BY_SESSION) is None  # no id to deduplicate on
     assert parse_waha(waha_join(), BY_SESSION) == GroupJoin("acme", "120363041234567890@g.us")
     assert parse_waha(waha_message(session="other"), BY_SESSION) is None
     assert parse_waha(waha_message(event="session.status"), BY_SESSION) is None
@@ -986,6 +1005,7 @@ class Incoming:
     kind: str  # "text", "audio" or "unsupported"
     text: str = ""
     audio: str | None = None  # Meta media id, or WAHA media URL
+    audio_bytes: bytes | None = None  # the downloaded note, filled before per-chat processing starts
     reply_to: str | None = None
     mentions_bot: bool = False
     from_me: bool = False
@@ -1086,6 +1106,8 @@ def parse_waha(envelope: dict, by_session: dict[str, Client]) -> Incoming | Grou
         return GroupJoin(client.id, group_id) if group_id else None
     if event != "message":
         return None
+    if not str(p.get("id") or ""):
+        return None  # without an id, the next id-less event would dedupe against this one
     chat = str(p.get("from") or "")
     is_group = chat.endswith("@g.us")
     sender = str((p.get("participant") if is_group else chat) or "")
@@ -1124,7 +1146,7 @@ Expected: PASS (14 passed)
 
 ```bash
 git add app/whatsapp.py tests/payloads.py tests/test_whatsapp_parse.py
-git -c user.name="Jawad" -c user.email="jawad@thesolutioners.ca" commit -m "feat: parse Meta and WAHA webhooks, verify signatures"
+git commit -m "feat: parse Meta and WAHA webhooks, verify signatures"
 ```
 
 ### Task 4: Sending messages and downloading voice notes
@@ -1365,7 +1387,7 @@ Expected: PASS (20 passed)
 
 ```bash
 git add app/whatsapp.py tests/test_whatsapp_send.py
-git -c user.name="Jawad" -c user.email="jawad@thesolutioners.ca" commit -m "feat: send text and download media via Meta and WAHA"
+git commit -m "feat: send text and download media via Meta and WAHA"
 ```
 
 ### Task 5: Google Sheets access and permission-checked tools
@@ -1706,6 +1728,7 @@ class Sheets:
         headers = [h.strip() for h in ws.row_values(1)]
         # RAW stores text as typed, so "=IMPORTXML(...)" sent in a chat never runs as a formula.
         ws.append_row([row.get(h, "") for h in headers], value_input_option="RAW")
+        self._cache.pop(("headers", sheet_id, tab), None)  # a renamed column converges on the next read
 
     def knowledge(self, sheet_id: str, tab: str, now: float | None = None) -> str:
         def load() -> str:
@@ -1986,7 +2009,7 @@ Expected: PASS (20 passed)
 
 ```bash
 git add app/sheets.py app/tools.py tests/fakes.py tests/test_sheets.py tests/test_tools.py
-git -c user.name="Jawad" -c user.email="jawad@thesolutioners.ca" commit -m "feat: sheets access and permission-checked tools"
+git commit -m "feat: sheets access and permission-checked tools"
 ```
 
 ### Task 6: Model client (Chat Completions + transcription) and the scripted fake
@@ -2237,7 +2260,7 @@ If `test_assistant_message_goes_back_with_provider_extras` fails, the installed 
 
 ```bash
 git add app/llm.py tests/fakes.py tests/test_llm.py
-git -c user.name="Jawad" -c user.email="jawad@thesolutioners.ca" commit -m "feat: provider-agnostic chat and transcription client"
+git commit -m "feat: provider-agnostic chat and transcription client"
 ```
 
 ### Task 7: The bot pipeline: reply rules, tool loop, intro, sending
@@ -2603,7 +2626,8 @@ class Bot:
     def _addressed(self, m: Incoming) -> bool:
         if not m.is_group:
             return True
-        return m.mentions_bot or (m.reply_to is not None and self.store.is_bot_message(m.channel, m.reply_to))
+        return m.mentions_bot or (m.reply_to is not None
+                                  and self.store.is_bot_message(m.client_id, m.channel, m.reply_to))
 
     def _think(self, client: Client, m: Incoming, caller: Caller, now: float) -> str:
         messages = [{"role": "system", "content": self._system_prompt(client, m, caller, now)},
@@ -2712,7 +2736,7 @@ Expected: all tests pass.
 
 ```bash
 git add app/bot.py tests/fakes.py tests/test_bot.py
-git -c user.name="Jawad" -c user.email="jawad@thesolutioners.ca" commit -m "feat: bot pipeline with reply rules, tool loop and AI intro"
+git commit -m "feat: bot pipeline with reply rules, tool loop and AI intro"
 ```
 
 ### Task 8: Sheet writes: customers confirm with YES, staff save at once
@@ -2834,7 +2858,8 @@ from app.tools import (TOOL_SPECS, TOTAL_ARGS, Caller, build_row, describe_tabs,
 Add below the `FALLBACK` constant:
 ```python
 PENDING_TTL = 600  # seconds a proposed Sheet row waits for YES
-YES = {"yes", "y", "yep", "yes please", "confirm", "ok", "okay", "haan", "han", "ji", "jee", "ہاں", "جی", "نعم", "👍"}
+# "ok"/"okay" are deliberately absent: people say them as acknowledgement, not confirmation.
+YES = {"yes", "y", "yep", "yes please", "confirm", "haan", "han", "ji", "jee", "ہاں", "جی", "نعم", "👍"}
 NO = {"no", "n", "nope", "cancel", "nahi", "nahin", "نہیں", "لا", "👎"}
 
 
@@ -2920,7 +2945,7 @@ Expected: PASS (24 passed)
 
 ```bash
 git add app/bot.py tests/test_bot_writes.py
-git -c user.name="Jawad" -c user.email="jawad@thesolutioners.ca" commit -m "feat: customer writes wait for YES, staff writes save at once"
+git commit -m "feat: customer writes wait for YES, staff writes save at once"
 ```
 
 ### Task 9: Voice notes, unsupported media, handoff and model failure
@@ -2936,6 +2961,8 @@ git -c user.name="Jawad" -c user.email="jawad@thesolutioners.ca" commit -m "feat
   - `Bot._deliver` (Task 7) and `Bot._answer_pending` (Task 8)
 - Produces:
   - Constants `app.bot.MAX_AUDIO_BYTES`, `UNSUPPORTED`, `TOO_LONG` and `UNHEARD`.
+  - `Bot._reply_allowed(client, m, now) -> bool`: the loop breaker, applied by `Bot._send` to every reply.
+  - `Bot.handle` downloads voice media before taking the chat lock, so Meta's expiring download URLs stay fresh.
   - `Bot._transcribe(m) -> str | None`: returns a reply for the user when the note can't be used.
   - `Bot._handoff(client, m, reason, now) -> Final`.
   - `handoff` handled in `Bot._run_tool`.
@@ -2986,6 +3013,15 @@ def test_long_or_unclear_voice_notes_get_a_polite_reply():
     assert llm.calls == []
 
 
+# Review focus: code-composed replies must obey the loop breaker too.
+def test_voice_note_failures_obey_the_burst_limit():
+    bot, _ = make_bot()
+    for i in range(8):
+        bot.meta.audio[f"v{i}"] = b"x" * 1_000_001
+        bot.handle(incoming("", kind="audio", audio=f"v{i}", msg_id=f"v{i}"))
+    assert len(bot.meta.sent) == 6
+
+
 def test_images_get_a_text_only_reply():
     bot, llm = make_bot()
     bot.handle(incoming("", kind="unsupported"))
@@ -3014,6 +3050,13 @@ def test_model_failure_sends_the_fallback_and_hands_off():
     bot.handle(incoming("hi"))
     assert texts(bot.meta)[-1].endswith(FALLBACK)
     assert bot.sheets.appended[0][0] == "Handoffs"
+
+
+def test_exhausted_budget_sends_the_fallback_and_hands_off():
+    bot, _ = make_bot(*[call("lookup_rows", tab="Prices", query="x") for _ in range(4)])
+    bot.handle(incoming("?"))
+    assert texts(bot.meta)[-1].endswith(FALLBACK)
+    assert bot.sheets.appended[0][0] == "Handoffs"
 ```
 
 - [ ] **Step 2: Run the tests to verify they fail**
@@ -3031,7 +3074,25 @@ TOO_LONG = "That voice note is too long for me. Could you send a shorter one or 
 UNHEARD = "Sorry, I couldn't make out that voice note. Could you type it?"
 ```
 
-Replace `Bot._handle` with:
+Replace `Bot.handle` with:
+```python
+    def handle(self, m: Incoming) -> None:
+        # Voice media is fetched before the chat lock: waiting behind a slow model call for an
+        # earlier message could push the download past Meta's five-minute URL expiry.
+        if m.kind == "audio" and m.audio:
+            try:
+                m.audio_bytes = self.meta.download(m.audio) if m.channel == "meta" else self.waha.download(m.audio)
+            except Exception:
+                log.exception("audio_download_failed client=%s", m.client_id)
+        # ponytail: one message per chat at a time and no debounce; 3 quick messages get 3 replies.
+        with self._chat_locks[f"{m.client_id}:{m.chat_id}"]:
+            try:
+                self._handle(m)
+            except Exception:
+                log.exception("handle_failed client=%s chat=%s", m.client_id, self._h(m.chat_id))
+```
+
+Replace `Bot._handle` with (and add `_reply_allowed` right after it):
 ```python
     def _handle(self, m: Incoming) -> None:
         client = self.clients[m.client_id]
@@ -3045,19 +3106,36 @@ Replace `Bot._handle` with:
             problem = self._transcribe(m)  # every note, so group history stays complete
             if problem:
                 if self._addressed(m):
-                    self._send(client, m, problem)
+                    self._send(client, m, problem)  # _send applies the loop breaker
                 return
         if self._answer_pending(client, m, now):
             return
         if not self._addressed(m):
             return
-        if self.store.bot_replies_since(client.id, m.chat_id, now - BURST_WINDOW) >= BURST_LIMIT:
-            log.warning("burst_limit client=%s chat=%s", client.id, self._h(m.chat_id))
+        if not self._reply_allowed(client, m, now):  # don't pay for a reply that can't be sent
             return
         if m.kind == "unsupported":
             self._send(client, m, UNSUPPORTED)
             return
         self._send(client, m, self._think(client, m, self._caller(client, m), now))
+
+    def _reply_allowed(self, client: Client, m: Incoming, now: float) -> bool:
+        """The loop breaker: at most BURST_LIMIT bot replies per chat per BURST_WINDOW."""
+        if self.store.bot_replies_since(client.id, m.chat_id, now - BURST_WINDOW) >= BURST_LIMIT:
+            log.warning("burst_limit client=%s chat=%s", client.id, self._h(m.chat_id))
+            return False
+        return True
+```
+
+Replace `Bot._send` with:
+```python
+    def _send(self, client: Client, m: Incoming, text: str) -> None:
+        """Every user-facing reply goes through here, so the loop breaker gates them all."""
+        if not self._reply_allowed(client, m, self.clock()):
+            return
+        if not self.store.bot_has_spoken(client.id, m.chat_id):
+            text = f"{intro(client, m.is_group)}\n\n{text}"
+        self._deliver(client, m.channel, m.chat_id, m.address, text, reply_to=m.msg_id if m.is_group else None)
 ```
 
 Replace `Bot._think` with:
@@ -3082,6 +3160,7 @@ Replace `Bot._think` with:
                 messages.append({"role": "tool", "tool_call_id": tool_call.id,
                                  "content": json.dumps(result, ensure_ascii=False, default=str)})
         log.warning("model_budget_exhausted client=%s", client.id)
+        self._handoff(client, m, "The assistant ran out of steps.", now)
         return FALLBACK
 ```
 
@@ -3095,21 +3174,18 @@ Add these methods at the end of the `Bot` class:
 ```python
     def _transcribe(self, m: Incoming) -> str | None:
         """Fill m.text from the voice note. Returns a reply for the user when that isn't possible."""
-        try:
-            audio = self.meta.download(m.audio) if m.channel == "meta" else self.waha.download(m.audio)
-        except Exception:
-            log.exception("audio_download_failed client=%s", m.client_id)
-            return UNHEARD
-        if len(audio) > MAX_AUDIO_BYTES:
+        if m.audio_bytes is None:
+            return UNHEARD  # the download failed before the chat lock was taken
+        if len(m.audio_bytes) > MAX_AUDIO_BYTES:
             return TOO_LONG
         try:
-            m.text = self.llm.transcribe(audio)
+            m.text = self.llm.transcribe(m.audio_bytes)
         except Exception:
             log.exception("transcribe_failed client=%s", m.client_id)
             return UNHEARD
         if not m.text:
             return UNHEARD
-        self.store.set_text(m.channel, m.msg_id, m.text)
+        self.store.set_text(m.client_id, m.channel, m.msg_id, m.text)
         return None
 
     def _handoff(self, client: Client, m: Incoming, reason: str, now: float) -> Final:
@@ -3131,13 +3207,13 @@ Add these methods at the end of the `Bot` class:
 - [ ] **Step 4: Run the tests to verify they pass**
 
 Run: `uv run pytest tests/test_bot_edges.py tests/test_bot_writes.py tests/test_bot.py -v`
-Expected: PASS (32 passed)
+Expected: PASS (34 passed)
 
 - [ ] **Step 5: Commit**
 
 ```bash
 git add app/bot.py tests/test_bot_edges.py
-git -c user.name="Jawad" -c user.email="jawad@thesolutioners.ca" commit -m "feat: voice notes, handoff to staff and model-failure fallback"
+git commit -m "feat: voice notes, handoff to staff and model-failure fallback"
 ```
 
 ### Task 10: HTTP app: webhooks, health and daily maintenance
@@ -3245,6 +3321,15 @@ def test_waha_webhook_routes_messages_and_group_joins():
     assert bot.greeted == [("acme", "120363041234567890@g.us")]
 
 
+# Review focus: a body that fails to parse still gets its 200 once the signature is valid.
+def test_signed_but_unparsable_bodies_still_get_a_200():
+    http, bot = http_and_bot()
+    junk = b"not json"
+    assert http.post("/webhooks/meta", content=junk, headers=meta_headers(junk)).status_code == 200
+    assert http.post("/webhooks/waha", content=junk, headers=waha_headers(junk)).status_code == 200
+    assert bot.handled == [] and bot.greeted == []
+
+
 def test_health_reflects_the_waha_session():
     http, bot = http_and_bot()
     assert http.get("/health").json() == {"ok": True, "waha": {"acme": "WORKING"}}
@@ -3313,7 +3398,8 @@ def build_bot(settings: Settings) -> Bot:
 
 
 def maintain(bot: Bot, backup_dir: str, now: float) -> None:
-    """Delete messages past each client's retention, then keep the last 7 daily backups."""
+    """Drop expired pending writes and messages past each client's retention, then keep 7 backups."""
+    bot.store.purge_expired_pending(now)
     for client in bot.clients.values():
         bot.store.delete_older_than(client.id, now - client.retention_days * DAY)
     folder = Path(backup_dir)
@@ -3357,7 +3443,12 @@ def create_app(settings: Settings | None = None, bot: Bot | None = None) -> Fast
         body = await request.body()
         if not verify_meta_signature(settings.meta_app_secret, body, request.headers.get("x-hub-signature-256")):
             return Response(status_code=403)
-        for m in parse_meta(json.loads(body), by_phone):
+        try:
+            messages = parse_meta(json.loads(body), by_phone)
+        except (ValueError, AttributeError, TypeError):
+            log.warning("meta_webhook_unparsable")  # still a 200: the signature was valid
+            messages = []
+        for m in messages:
             tasks.add_task(bot.handle, m)  # Meta retries slow answers, so reply 200 first and work after
         return JSONResponse({"ok": True})
 
@@ -3366,7 +3457,11 @@ def create_app(settings: Settings | None = None, bot: Bot | None = None) -> Fast
         body = await request.body()
         if not verify_waha_hmac(settings.waha_webhook_secret, body, request.headers):
             return Response(status_code=403)
-        event = parse_waha(json.loads(body), by_session)
+        try:
+            event = parse_waha(json.loads(body), by_session)
+        except (ValueError, AttributeError, TypeError):
+            log.warning("waha_webhook_unparsable")
+            event = None
         if isinstance(event, GroupJoin):
             tasks.add_task(bot.greet, event.client_id, event.chat_id)
         elif event is not None:
@@ -3385,7 +3480,7 @@ def create_app(settings: Settings | None = None, bot: Bot | None = None) -> Fast
 - [ ] **Step 4: Run the tests to verify they pass**
 
 Run: `uv run pytest tests/test_api.py -v`
-Expected: PASS (5 passed)
+Expected: PASS (6 passed)
 
 - [ ] **Step 5: Run the whole suite and the linter**
 
@@ -3396,7 +3491,7 @@ Expected: all tests pass; ruff prints `All checks passed!`
 
 ```bash
 git add app/main.py tests/test_api.py
-git -c user.name="Jawad" -c user.email="jawad@thesolutioners.ca" commit -m "feat: webhook routes, health check and daily maintenance"
+git commit -m "feat: webhook routes, health check and daily maintenance"
 ```
 
 ### Task 11: Packaging and the operator runbook
@@ -3556,6 +3651,8 @@ Run against real services with `uv run --env-file .env uvicorn app.main:create_a
 1. Point an A record for `DOMAIN` at the VPS.
 2. Copy `.env`, `clients.yaml` and `secrets/` onto the VPS.
 3. Run `docker compose up -d --build`. Caddy fetches the HTTPS certificate on its own.
+   A restart drops messages that were accepted but not yet processed (there is no queue in v1),
+   so deploy during quiet hours.
 4. Check `https://$DOMAIN/health`. It returns 503 until the WAHA session is linked.
 
 ### 4. WAHA (purchased number, groups)
@@ -3597,7 +3694,7 @@ The engine writes `data/backups/assistant-YYYYMMDD.db` daily and keeps 7. Copy t
 
 ```bash
 git add Dockerfile .dockerignore docker-compose.yml Caddyfile README.md
-git -c user.name="Jawad" -c user.email="jawad@thesolutioners.ca" commit -m "chore: docker compose stack and operator runbook"
+git commit -m "chore: docker compose stack and operator runbook"
 ```
 
 - [ ] **Step 5: Owner checkpoint: live smoke test**
@@ -3827,13 +3924,13 @@ Expected: PASS (3 passed)
 - [ ] **Step 6: Run the whole suite and the linter**
 
 Run: `uv run pytest && uv run ruff check .`
-Expected: all tests pass (98 passed); ruff prints `All checks passed!`
+Expected: all tests pass (102 passed); ruff prints `All checks passed!`
 
 - [ ] **Step 7: Commit**
 
 ```bash
 git add evals/__init__.py evals/cases.yaml evals/run.py tests/test_evals.py
-git -c user.name="Jawad" -c user.email="jawad@thesolutioners.ca" commit -m "feat: scripted evals for choosing the default model"
+git commit -m "feat: scripted evals for choosing the default model"
 ```
 
 - [ ] **Step 8: Owner checkpoint: pick the model (costs a few cents)**
@@ -3842,5 +3939,5 @@ With real keys in `.env`, run the three commands under "Choosing the model" in `
 
 ```bash
 git add docs/superpowers/specs/2026-09-23-whatsapp-engine-design.md
-git -c user.name="Jawad" -c user.email="jawad@thesolutioners.ca" commit -m "docs: record default model from eval run"
+git commit -m "docs: record default model from eval run"
 ```
