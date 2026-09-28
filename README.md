@@ -3,7 +3,8 @@
 A WhatsApp AI assistant for one business at a time:
 - **Customer 1:1 chats** run on the business's official number (Meta Cloud API).
 - **Group @mentions** run on a purchased number linked through WAHA.
-- **Answers** come from the business's Google Sheet. The bot adds rows only after the user replies YES.
+- **Answers** come from the business's Google Sheet. Customers' new rows are added only after they reply YES;
+  staff rows are saved at once.
 - **Voice notes** are transcribed.
 
 Design: `docs/superpowers/specs/2026-09-23-whatsapp-engine-design.md`.
@@ -18,7 +19,9 @@ uv run pytest
 uv run ruff check .
 ```
 
-Run against real services with `uv run --env-file .env uvicorn app.main:create_app --factory --port 8000`. It needs `.env`, `clients.yaml` and the Google key in `secrets/`.
+Run against real services with `uv run --env-file .env uvicorn app.main:create_app --factory --port 8000`. It needs
+`.env`, `clients.yaml` and the Google key in `secrets/`. Run a single worker (the default): the per-chat locks and
+the SQLite connection live in one process.
 
 ## One-time setup for a pilot client
 
@@ -30,7 +33,8 @@ Run against real services with `uv run --env-file .env uvicorn app.main:create_a
    - `Handoffs`: `Time | Name | Phone | Chat | Question | Reason`.
    - The client's own tabs from `clients.yaml`, e.g. `Prices`; `Orders` with a `Phone` column; `Expenses` with `Date | Item | Amount | Category`.
    - The bot writes dates as `2026-06-30`. Dates typed in by hand must match the client's `date_format`, or totals will report those rows as unreadable.
-4. Copy `clients.example.yaml` to `clients.yaml` and fill in `sheet_id`, the tabs and the staff numbers.
+4. Copy `clients.example.yaml` to `clients.yaml` and fill in `sheet_id`, the tabs and the staff numbers
+   (with the country code).
 
 ### 2. Meta (official number, customer 1:1)
 1. In the **client's** Meta Business portfolio, create an app with the WhatsApp product and add their phone number. It must not be on the WhatsApp app at the same time.
@@ -48,7 +52,8 @@ Run against real services with `uv run --env-file .env uvicorn app.main:create_a
 
 ### 4. WAHA (purchased number, groups)
 1. Put the purchased SIM in a phone and install WhatsApp. Set the About text to "AI assistant for <business>".
-2. Open a tunnel with `ssh -L 3000:127.0.0.1:3000 you@vps`. Then create the session:
+2. Open a tunnel with `ssh -L 3000:127.0.0.1:3000 you@vps`. Export `WAHA_API_KEY` and `WAHA_WEBHOOK_SECRET` in
+   your shell first (the same values as in `.env`). Then create the session:
    ```bash
    curl -X POST http://localhost:3000/api/sessions -H "X-Api-Key: $WAHA_API_KEY" -H "Content-Type: application/json" \
      -d '{"name":"sweetbakes","start":true,"config":{"webhooks":[{"url":"http://engine:8000/webhooks/waha",
@@ -65,6 +70,9 @@ Point a free uptime monitor (e.g. UptimeRobot) at `https://$DOMAIN/health`. It t
 1. Get a new SIM and install WhatsApp on it.
 2. Log out the old WAHA session (`POST /api/sessions/sweetbakes/logout`), start it again (`POST /api/sessions/sweetbakes/start`) and scan the new QR.
 3. Add the new number to the groups.
+4. The new number won't re-introduce itself in groups where the bot already spoke (history survives the swap),
+   so post the intro there once by hand: "Hi, I'm <bot_name>, <business>'s AI assistant. I read messages here
+   so I can answer when you @mention me."
 
 Group ids don't change and history lives in SQLite, so nothing is lost.
 

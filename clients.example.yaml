@@ -19,7 +19,7 @@ clients:
     meta_phone_number_id: "106540352242922"
     waha_session: sweetbakes
     staff_chats: ["120363041234567890@g.us"]
-    staff_numbers: ["+92 300 1111111"]
+    staff_numbers: ["+92 300 1111111"]  # full number incl. country code; matched exactly, not just the last digits
     staff_alert_chat: "120363041234567890@g.us"
     retention_days: 90
     tabs:

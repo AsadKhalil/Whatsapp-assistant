@@ -14,6 +14,10 @@ services:
       - ./secrets/google-service-account.json:/config/google-service-account.json:ro
     depends_on: [waha]
     restart: unless-stopped
+    logging:
+      options:
+        max-size: "10m"
+        max-file: "3"
 
   waha:
     image: devlikeapro/waha:gows-2026.9.1
@@ -31,6 +35,10 @@ services:
     ports:
       - "127.0.0.1:3000:3000"  # dashboard and QR only through an SSH tunnel, never public
     restart: unless-stopped
+    logging:
+      options:
+        max-size: "10m"
+        max-file: "3"
 
   caddy:
     image: caddy:2
@@ -42,6 +50,10 @@ services:
       - caddy-data:/data
     depends_on: [engine]
     restart: unless-stopped
+    logging:
+      options:
+        max-size: "10m"
+        max-file: "3"
 
 volumes:
   caddy-data:
