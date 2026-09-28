@@ -1,10 +1,14 @@
 """In-memory stand-ins shared by the tests and the eval runner. Later tasks append to this file."""
 from __future__ import annotations
 
+import itertools
 import json
 
+from app.bot import Bot
 from app.config import Client, TabRule
 from app.llm import ModelReply, ToolCall
+from app.store import Store
+from app.whatsapp import Incoming
 
 
 def make_client(**overrides) -> Client:
@@ -110,3 +114,70 @@ class ScriptedLLM:
 
     def transcribe(self, audio: bytes) -> str:
         return self.transcript
+
+
+class FakeMeta:
+    def __init__(self) -> None:
+        self.sent: list[tuple[str, str, str | None]] = []
+        self.audio: dict[str, bytes] = {}
+        self.fail: Exception | None = None
+
+    def send_text(self, phone_number_id: str, to: str, text: str, reply_to: str | None = None) -> str:
+        if self.fail:
+            raise self.fail
+        self.sent.append((to, text, reply_to))
+        return f"wamid.out-{len(self.sent)}"
+
+    def download(self, media_id: str) -> bytes:
+        return self.audio[media_id]
+
+
+class FakeWaha:
+    def __init__(self) -> None:
+        self.sent: list[tuple[str, str, str | None]] = []
+        self.audio: dict[str, bytes] = {}
+        self.statuses: dict[str, str] = {}
+        self.fail: Exception | None = None
+
+    def send_text(self, session: str, chat_id: str, text: str, reply_to: str | None = None) -> str:
+        if self.fail:
+            raise self.fail
+        self.sent.append((chat_id, text, reply_to))
+        return f"waha-{len(self.sent)}"
+
+    def download(self, url: str) -> bytes:
+        return self.audio[url]
+
+    def status(self, session: str) -> str:
+        return self.statuses.get(session, "WORKING")
+
+
+_ids = itertools.count(1)
+
+
+def incoming(text: str = "hi", *, msg_id: str | None = None, group: str | None = None, mention: bool = False,
+             phone: str | None = "923001234567", name: str = "Ali", kind: str = "text", audio: str | None = None,
+             reply_to: str | None = None, channel: str = "meta") -> Incoming:
+    """A message to the bot: Meta 1:1 by default, a WAHA group message when `group` is given."""
+    msg_id = msg_id or f"msg-{next(_ids)}"
+    common = dict(client_id="acme", msg_id=msg_id, sender_name=name, sender_phone=phone, kind=kind, text=text,
+                  audio=audio, reply_to=reply_to)
+    if group:
+        return Incoming(channel="waha", chat_id=group, address=group, is_group=True,
+                        sender_id=f"{phone or 'hidden'}@c.us", mentions_bot=mention, **common)
+    if channel == "waha":
+        chat = f"{phone}@c.us"
+        return Incoming(channel="waha", chat_id=chat, address=chat, is_group=False, sender_id=chat, **common)
+    user = f"user-{phone}"
+    return Incoming(channel="meta", chat_id=user, address=phone or user, is_group=False, sender_id=user, **common)
+
+
+def make_bot(*replies: ModelReply, clock=lambda: 1_790_000_000.0, **llm_options):
+    client = make_client()
+    llm = ScriptedLLM(*replies, **llm_options)
+    bot = Bot(Store(":memory:"), bakery_sheets(), llm, FakeMeta(), FakeWaha(), {client.id: client}, clock=clock)
+    return bot, llm
+
+
+def texts(sender) -> list[str]:
+    return [text for _, text, _ in sender.sent]
