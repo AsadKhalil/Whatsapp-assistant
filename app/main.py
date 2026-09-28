@@ -26,6 +26,8 @@ DAY = 86_400
 
 def build_bot(settings: Settings) -> Bot:
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s %(message)s")
+    if settings.log_hash_key == "change-me":
+        log.warning("LOG_HASH_KEY is not set; hashed chat ids in the logs can be reversed")
     http = httpx.Client(timeout=30)
     return Bot(
         store=Store(settings.db_path),

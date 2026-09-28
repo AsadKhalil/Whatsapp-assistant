@@ -7,7 +7,7 @@ from fastapi.testclient import TestClient
 from app.config import Settings
 from app.main import create_app, maintain
 from app.store import Store
-from tests.fakes import FakeWaha, make_client
+from tests.fakes import FakeWaha, make_bot, make_client, say
 from tests.payloads import meta_status, meta_text, waha_join, waha_message
 
 SETTINGS = Settings(meta_app_secret="app-secret", meta_verify_token="verify-me", waha_webhook_secret="hook-secret")
@@ -94,6 +94,15 @@ def test_health_reflects_the_waha_session():
     bot.waha.statuses["acme"] = "SCAN_QR_CODE"
     r = http.get("/health")
     assert r.status_code == 503 and r.json()["waha"] == {"acme": "SCAN_QR_CODE"}
+
+
+def test_end_to_end_meta_webhook_produces_a_reply():
+    bot, _ = make_bot(say("We do! Which color?"))
+    http = TestClient(create_app(SETTINGS, bot))
+    body = json.dumps(meta_text()).encode()
+    assert http.post("/webhooks/meta", content=body, headers=meta_headers(body)).status_code == 200
+    assert bot.meta.sent[0][0] == "16505551234"
+    assert bot.meta.sent[0][1].endswith("We do! Which color?")
 
 
 def test_maintenance_deletes_old_messages_and_keeps_seven_backups(tmp_path):
