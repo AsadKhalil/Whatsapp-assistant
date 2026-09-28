@@ -1,0 +1,11 @@
+.git
+.venv
+.env
+clients.yaml
+secrets
+data
+backups
+waha
+tests
+evals
+docs

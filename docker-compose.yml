@@ -1,0 +1,47 @@
+services:
+  engine:
+    build: .
+    env_file: .env
+    environment:
+      DB_PATH: /data/assistant.db
+      BACKUP_DIR: /data/backups
+      CLIENTS_FILE: /config/clients.yaml
+      GOOGLE_SERVICE_ACCOUNT_FILE: /config/google-service-account.json
+      WAHA_URL: http://waha:3000
+    volumes:
+      - ./data:/data
+      - ./clients.yaml:/config/clients.yaml:ro
+      - ./secrets/google-service-account.json:/config/google-service-account.json:ro
+    depends_on: [waha]
+    restart: unless-stopped
+
+  waha:
+    image: devlikeapro/waha:gows-2026.9.1
+    environment:
+      WAHA_API_KEY: ${WAHA_API_KEY}
+      WAHA_DASHBOARD_USERNAME: ${WAHA_DASHBOARD_USERNAME}
+      WAHA_DASHBOARD_PASSWORD: ${WAHA_DASHBOARD_PASSWORD}
+      WHATSAPP_SWAGGER_USERNAME: ${WAHA_DASHBOARD_USERNAME}
+      WHATSAPP_SWAGGER_PASSWORD: ${WAHA_DASHBOARD_PASSWORD}
+      WAHA_BASE_URL: http://waha:3000  # media URLs in webhooks must be reachable from the engine
+      WHATSAPP_FILES_FOLDER: /app/.media
+    volumes:
+      - ./waha/sessions:/app/.sessions  # the linked WhatsApp login: treat as a secret
+      - ./waha/media:/app/.media
+    ports:
+      - "127.0.0.1:3000:3000"  # dashboard and QR only through an SSH tunnel, never public
+    restart: unless-stopped
+
+  caddy:
+    image: caddy:2
+    environment:
+      DOMAIN: ${DOMAIN}
+    ports: ["80:80", "443:443"]
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+    depends_on: [engine]
+    restart: unless-stopped
+
+volumes:
+  caddy-data:
