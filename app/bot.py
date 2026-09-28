@@ -29,6 +29,10 @@ PENDING_TTL = 600  # seconds a proposed Sheet row waits for YES
 # "ok"/"okay" are deliberately absent: people say them as acknowledgement, not confirmation.
 YES = {"yes", "y", "yep", "yes please", "confirm", "haan", "han", "ji", "jee", "ہاں", "جی", "نعم", "👍"}
 NO = {"no", "n", "nope", "cancel", "nahi", "nahin", "نہیں", "لا", "👎"}
+MAX_AUDIO_BYTES = 1_000_000  # about 5 minutes of WhatsApp voice note
+UNSUPPORTED = "I can read text and voice notes for now. Could you type that for me?"
+TOO_LONG = "That voice note is too long for me. Could you send a shorter one or type it?"
+UNHEARD = "Sorry, I couldn't make out that voice note. Could you type it?"
 
 
 def normalize(text: str) -> str:
@@ -69,6 +73,13 @@ class Bot:
         return hmac.new(self._log_key, value.encode(), hashlib.sha256).hexdigest()[:12]
 
     def handle(self, m: Incoming) -> None:
+        # Voice media is fetched before the chat lock: waiting behind a slow model call for an
+        # earlier message could push the download past Meta's five-minute URL expiry.
+        if m.kind == "audio" and m.audio:
+            try:
+                m.audio_bytes = self.meta.download(m.audio) if m.channel == "meta" else self.waha.download(m.audio)
+            except Exception:
+                log.exception("audio_download_failed client=%s", m.client_id)
         # ponytail: one message per chat at a time and no debounce; 3 quick messages get 3 replies.
         with self._chat_locks[f"{m.client_id}:{m.chat_id}"]:
             try:
@@ -91,14 +102,29 @@ class Bot:
             return  # WhatsApp delivered this message before
         if m.from_me:
             return
+        if m.kind == "audio":
+            problem = self._transcribe(m)  # every note, so group history stays complete
+            if problem:
+                if self._addressed(m):
+                    self._send(client, m, problem)  # _send applies the loop breaker
+                return
         if self._answer_pending(client, m, now):
             return
         if not self._addressed(m):
             return
-        if self.store.bot_replies_since(client.id, m.chat_id, now - BURST_WINDOW) >= BURST_LIMIT:
-            log.warning("burst_limit client=%s chat=%s", client.id, self._h(m.chat_id))
+        if not self._reply_allowed(client, m, now):  # don't pay for a reply that can't be sent
+            return
+        if m.kind == "unsupported":
+            self._send(client, m, UNSUPPORTED)
             return
         self._send(client, m, self._think(client, m, self._caller(client, m), now))
+
+    def _reply_allowed(self, client: Client, m: Incoming, now: float) -> bool:
+        """The loop breaker: at most BURST_LIMIT bot replies per chat per BURST_WINDOW."""
+        if self.store.bot_replies_since(client.id, m.chat_id, now - BURST_WINDOW) >= BURST_LIMIT:
+            log.warning("burst_limit client=%s chat=%s", client.id, self._h(m.chat_id))
+            return False
+        return True
 
     def _answer_pending(self, client: Client, m: Incoming, now: float) -> bool:
         """YES saves the sender's proposed row and NO drops it; only the customer who proposed it can answer."""
@@ -136,7 +162,12 @@ class Bot:
         messages = [{"role": "system", "content": self._system_prompt(client, m, caller, now)},
                     *self._history(client, m)]
         for _ in range(MAX_MODEL_CALLS):
-            reply = self.llm.complete(messages, TOOL_SPECS)
+            try:
+                reply = self.llm.complete(messages, TOOL_SPECS)
+            except Exception:
+                log.exception("model_failed client=%s", client.id)
+                self._handoff(client, m, "The assistant had an error.", now)
+                return FALLBACK
             if not reply.tool_calls:
                 return reply.text or FALLBACK
             messages.append(reply.message)
@@ -147,6 +178,7 @@ class Bot:
                 messages.append({"role": "tool", "tool_call_id": tool_call.id,
                                  "content": json.dumps(result, ensure_ascii=False, default=str)})
         log.warning("model_budget_exhausted client=%s", client.id)
+        self._handoff(client, m, "The assistant ran out of steps.", now)
         return FALLBACK
 
     def _run_tool(self, client: Client, m: Incoming, caller: Caller, name: str, args: dict,
@@ -167,6 +199,8 @@ class Bot:
                     return Final(saved_text(tab, result["row"]))
                 self.store.put_pending(client.id, m.chat_id, m.sender_id, tab, result["row"], now + PENDING_TTL)
                 return Final(proposal_text(tab, result["row"]))
+            if name == "handoff":
+                return self._handoff(client, m, str(args.get("reason", "")), now)
         except Exception:
             log.exception("tool_failed tool=%s client=%s", name, client.id)
             return {"error": "The sheet couldn't be reached right now."}
@@ -216,6 +250,9 @@ class Bot:
         return out
 
     def _send(self, client: Client, m: Incoming, text: str) -> None:
+        """Every user-facing reply goes through here, so the loop breaker gates them all."""
+        if not self._reply_allowed(client, m, self.clock()):
+            return
         if not self.store.bot_has_spoken(client.id, m.chat_id):
             text = f"{intro(client, m.is_group)}\n\n{text}"
         self._deliver(client, m.channel, m.chat_id, m.address, text, reply_to=m.msg_id if m.is_group else None)
@@ -233,3 +270,34 @@ class Bot:
             return
         self.store.save_message(client.id, channel, msg_id or f"local-{uuid.uuid4().hex}", chat_id,
                                 "bot", client.bot_name, text, True, self.clock())
+
+    def _transcribe(self, m: Incoming) -> str | None:
+        """Fill m.text from the voice note. Returns a reply for the user when that isn't possible."""
+        if m.audio_bytes is None:
+            return UNHEARD  # the download failed before the chat lock was taken
+        if len(m.audio_bytes) > MAX_AUDIO_BYTES:
+            return TOO_LONG
+        try:
+            m.text = self.llm.transcribe(m.audio_bytes)
+        except Exception:
+            log.exception("transcribe_failed client=%s", m.client_id)
+            return UNHEARD
+        if not m.text:
+            return UNHEARD
+        self.store.set_text(m.client_id, m.channel, m.msg_id, m.text)
+        return None
+
+    def _handoff(self, client: Client, m: Incoming, reason: str, now: float) -> Final:
+        local = datetime.fromtimestamp(now, ZoneInfo(client.timezone))
+        row = {"Time": f"{local:%Y-%m-%d %H:%M}", "Name": m.sender_name, "Phone": m.sender_phone or "",
+               "Chat": m.chat_id, "Question": m.text, "Reason": reason}
+        try:
+            self.sheets.append(client.sheet_id, client.handoff_tab, row)
+        except Exception:
+            log.exception("handoff_row_failed client=%s", client.id)
+        if client.staff_alert_chat and client.waha_session:
+            who = f"{m.sender_name or 'A customer'} ({m.sender_phone or 'number hidden'})"
+            self._deliver(client, "waha", client.staff_alert_chat, client.staff_alert_chat,
+                          f"🙋 {who} needs a person: {m.text[:300]}")
+        ack = "I've passed this to the team. Someone will get back to you soon."
+        return Final(ack if m.sender_phone else f"{ack} What's the best number to reach you on?")
