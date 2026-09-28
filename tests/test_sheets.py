@@ -1,4 +1,8 @@
 from app.sheets import Sheets
+from app.tools import Caller, lookup_rows, total_rows
+from tests.fakes import make_client
+
+STAFF = Caller("staff", False, "Bilal", "923001111111")
 
 
 class FakeWorksheet:
@@ -65,3 +69,19 @@ def test_headers_are_trimmed_and_cached():
     assert sheets.headers("s", "Prices", now=0) == ["Item", "Price"]
     ws.values[0] = ["Changed"]
     assert sheets.headers("s", "Prices", now=10) == ["Item", "Price"]
+
+
+def test_header_with_a_stray_space_still_lets_a_customer_find_their_own_row():
+    ws = FakeWorksheet([["Phone ", "Item"], ["923001234567", "Cake"]])
+    sheets = Sheets(FakeGC({"Orders": ws}))
+    caller = Caller("customer", False, "Ali", "923001234567")
+    r = lookup_rows(sheets, make_client(), caller, "Orders", "")
+    assert r["rows"] == [{"Phone": "923001234567", "Item": "Cake"}]
+
+
+def test_blank_middle_rows_are_dropped_before_counting():
+    ws = FakeWorksheet([["Date", "Amount"], ["2026-06-01", "100"], ["", ""], ["2026-06-02", "200"]])
+    sheets = Sheets(FakeGC({"Expenses": ws}))
+    r = total_rows(sheets, make_client(), STAFF, "Expenses", sum_column="Amount")
+    assert r["rows_counted"] == 2 and r["total"] == 300
+    assert r["skipped"] == {"unreadable_date": 0, "unreadable_number": 0}

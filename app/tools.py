@@ -114,8 +114,12 @@ def _visible_rows(sheets, client: Client, caller: Caller, tab: str) -> list[dict
         return {"error": "This customer's phone number is hidden, so their rows can't be found. "
                          "Offer a handoff."}
     rows = sheets.rows(client.sheet_id, tab)
+    rows = [r for r in rows if any(str(v).strip() for v in r.values())]  # gspread 6 pads cleared rows blank
     if own_only:
         owner = client.tabs[tab].owner_column
+        if rows and owner not in rows[0]:
+            return {"error": f"Tab {tab!r} has no {owner!r} column, so this customer's rows can't be found. "
+                             "Offer a handoff."}
         rows = [r for r in rows if same_phone(str(r.get(owner, "")), caller.phone)]
     return rows
 

@@ -1,5 +1,5 @@
 from app.tools import Caller, build_row, can, describe_tabs, lookup_rows, proposal_text, saved_text, total_rows
-from tests.fakes import bakery_sheets, make_client
+from tests.fakes import FakeSheets, bakery_sheets, make_client
 
 ALI = "923001234567"
 CUSTOMER = Caller("customer", False, "Ali", ALI)
@@ -20,6 +20,12 @@ def test_customer_sees_only_own_orders_whatever_the_phone_format():
 
 def test_hidden_phone_cannot_read_own_rows():
     assert "hidden" in lookup_rows(bakery_sheets(), make_client(), HIDDEN, "Orders", "")["error"]
+
+
+def test_missing_owner_column_gives_a_handoff_error_for_a_customer_own_lookup():
+    sheets = FakeSheets({"Orders": [{"Item": "Cake", "Name": "Ali"}]})
+    r = lookup_rows(sheets, make_client(), CUSTOMER, "Orders", "")
+    assert "has no" in r["error"] and "Phone" in r["error"] and "handoff" in r["error"].lower()
 
 
 def test_customer_cannot_read_staff_or_unknown_tabs():

@@ -38,7 +38,7 @@ class Sheets:
         return value
 
     def rows(self, sheet_id: str, tab: str) -> list[dict]:
-        return self._tab(sheet_id, tab).get_all_records()
+        return [{str(k).strip(): v for k, v in r.items()} for r in self._tab(sheet_id, tab).get_all_records()]
 
     def headers(self, sheet_id: str, tab: str, now: float | None = None) -> list[str]:
         return self._cached(("headers", sheet_id, tab),
