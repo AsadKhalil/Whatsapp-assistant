@@ -14,7 +14,8 @@ from datetime import datetime
 from zoneinfo import ZoneInfo
 
 from app.config import Client, same_phone
-from app.tools import TOOL_SPECS, TOTAL_ARGS, Caller, describe_tabs, lookup_rows, total_rows
+from app.tools import (TOOL_SPECS, TOTAL_ARGS, Caller, build_row, describe_tabs, lookup_rows, proposal_text,
+                       saved_text, total_rows)
 from app.whatsapp import Incoming, SendError
 
 log = logging.getLogger("bot")
@@ -24,6 +25,14 @@ HISTORY = 50
 BURST_LIMIT, BURST_WINDOW = 6, 600  # at most 6 bot replies per chat per 10 minutes (loop breaker)
 MAX_TEXT = 4000  # WhatsApp rejects text bodies over 4096 characters
 FALLBACK = "Sorry, I'm having trouble right now. The team will get back to you."
+PENDING_TTL = 600  # seconds a proposed Sheet row waits for YES
+# "ok"/"okay" are deliberately absent: people say them as acknowledgement, not confirmation.
+YES = {"yes", "y", "yep", "yes please", "confirm", "haan", "han", "ji", "jee", "ہاں", "جی", "نعم", "👍"}
+NO = {"no", "n", "nope", "cancel", "nahi", "nahin", "نہیں", "لا", "👎"}
+
+
+def normalize(text: str) -> str:
+    return text.strip().lower().strip(" .!?,")
 
 
 @dataclass
@@ -80,12 +89,39 @@ class Bot:
         if not self.store.save_message(client.id, m.channel, m.msg_id, m.chat_id, m.sender_id,
                                        m.sender_name, m.text, m.from_me, now):
             return  # WhatsApp delivered this message before
-        if m.from_me or not self._addressed(m):
+        if m.from_me:
+            return
+        if self._answer_pending(client, m, now):
+            return
+        if not self._addressed(m):
             return
         if self.store.bot_replies_since(client.id, m.chat_id, now - BURST_WINDOW) >= BURST_LIMIT:
             log.warning("burst_limit client=%s chat=%s", client.id, self._h(m.chat_id))
             return
         self._send(client, m, self._think(client, m, self._caller(client, m), now))
+
+    def _answer_pending(self, client: Client, m: Incoming, now: float) -> bool:
+        """YES saves the sender's proposed row and NO drops it; only the customer who proposed it can answer."""
+        word = normalize(m.text)
+        if word not in YES and word not in NO:
+            return False
+        pending = self.store.get_pending(client.id, m.chat_id, m.sender_id, now)
+        if pending is None:
+            return False
+        if word in NO:
+            self.store.drop_pending(client.id, m.chat_id, m.sender_id)
+            self._send(client, m, "Cancelled, nothing was saved.")
+            return True
+        tab, row = pending
+        try:
+            self.sheets.append(client.sheet_id, tab, row)
+        except Exception:
+            log.exception("append_failed client=%s tab=%s", client.id, tab)
+            self._send(client, m, "Couldn't save that, reply YES to try again.")
+            return True
+        self.store.drop_pending(client.id, m.chat_id, m.sender_id)
+        self._send(client, m, f"✅ Added to {tab}.")
+        return True
 
     def _caller(self, client: Client, m: Incoming) -> Caller:
         return Caller(role_for(client, m), m.is_group, m.sender_name, m.sender_phone)
@@ -121,6 +157,16 @@ class Bot:
                 return lookup_rows(self.sheets, client, caller, tab, str(args.get("query", "")))
             if name == "total_rows":
                 return total_rows(self.sheets, client, caller, tab, **{k: str(args.get(k, "")) for k in TOTAL_ARGS})
+            if name == "propose_row":
+                values = args.get("values")
+                result = build_row(self.sheets, client, caller, tab, values if isinstance(values, list) else [])
+                if "error" in result:
+                    return result
+                if caller.role == "staff":  # staff rows save at once; the reply shows exactly what was saved
+                    self.sheets.append(client.sheet_id, tab, result["row"])
+                    return Final(saved_text(tab, result["row"]))
+                self.store.put_pending(client.id, m.chat_id, m.sender_id, tab, result["row"], now + PENDING_TTL)
+                return Final(proposal_text(tab, result["row"]))
         except Exception:
             log.exception("tool_failed tool=%s client=%s", name, client.id)
             return {"error": "The sheet couldn't be reached right now."}
