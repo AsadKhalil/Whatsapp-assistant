@@ -13,7 +13,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from zoneinfo import ZoneInfo
 
-from app.config import Client, same_phone
+from app.config import Client, digits
 from app.tools import (TOOL_SPECS, TOTAL_ARGS, Caller, build_row, describe_tabs, lookup_rows, proposal_text,
                        saved_text, total_rows)
 from app.whatsapp import Incoming, SendError
@@ -49,7 +49,7 @@ def role_for(client: Client, m: Incoming) -> str:
     if m.chat_id in client.staff_chats:
         return "staff"
     # In groups only the group decides, so a staff member can't pull private rows into a customer group.
-    if not m.is_group and m.sender_phone and any(same_phone(m.sender_phone, n) for n in client.staff_numbers):
+    if not m.is_group and digits(m.sender_phone) in client.staff_numbers:
         return "staff"
     return "customer"
 
@@ -73,14 +73,16 @@ class Bot:
         return hmac.new(self._log_key, value.encode(), hashlib.sha256).hexdigest()[:12]
 
     def handle(self, m: Incoming) -> None:
-        # Voice media is fetched before the chat lock: waiting behind a slow model call for an
-        # earlier message could push the download past Meta's five-minute URL expiry.
+        # Voice media is fetched before the chat lock because WAHA deletes downloaded media after
+        # WHATSAPP_FILES_LIFETIME (180 s by default), so waiting behind a slow model call could lose it.
         if m.kind == "audio" and m.audio:
             try:
                 m.audio_bytes = self.meta.download(m.audio) if m.channel == "meta" else self.waha.download(m.audio)
             except Exception:
-                log.exception("audio_download_failed client=%s", m.client_id)
+                log.exception("audio_download_failed client=%s chat=%s", m.client_id, self._h(m.chat_id))
         # ponytail: one message per chat at a time and no debounce; 3 quick messages get 3 replies.
+        # Each waiting message holds one of the 40 worker threads, so a long model outage in a busy
+        # chat can stall others; add a queue if that bites.
         with self._chat_locks[f"{m.client_id}:{m.chat_id}"]:
             try:
                 self._handle(m)
@@ -137,6 +139,8 @@ class Bot:
         pending = self.store.get_pending(client.id, m.chat_id, m.sender_id, now)
         if pending is None:
             return False
+        if not self._reply_allowed(client, m, now):
+            return True  # can't confirm it, so don't act on it yet
         if word in NO:
             self.store.drop_pending(client.id, m.chat_id, m.sender_id)
             self._send(client, m, "Cancelled, nothing was saved.")
@@ -172,12 +176,24 @@ class Bot:
                 self._handoff(client, m, "The assistant had an error.", now)
                 return FALLBACK
             if not reply.tool_calls:
-                return reply.text or FALLBACK
+                if reply.text:
+                    return reply.text
+                self._handoff(client, m, "The assistant gave an empty answer.", now)
+                return FALLBACK
             messages.append(reply.message)
+            finals, results = [], []
             for tool_call in reply.tool_calls:
                 result = self._run_tool(client, m, caller, tool_call.name, tool_call.arguments, now)
                 if isinstance(result, Final):
-                    return result.text
+                    finals.append(result.text)
+                    if caller.role != "staff":
+                        break  # one proposal per customer turn: a second would replace the pending one
+                else:
+                    results.append((tool_call, result))
+            if finals:  # a code-composed reply ends the turn; failed staff saves are listed, never dropped
+                failed = [r["error"] for c, r in results if c.name == "propose_row" and "error" in r]
+                return "\n\n".join(finals + [f"⚠️ Not saved: {error}" for error in failed])
+            for tool_call, result in results:
                 messages.append({"role": "tool", "tool_call_id": tool_call.id,
                                  "content": json.dumps(result, ensure_ascii=False, default=str)})
         log.warning("model_budget_exhausted client=%s", client.id)
@@ -186,12 +202,13 @@ class Bot:
 
     def _run_tool(self, client: Client, m: Incoming, caller: Caller, name: str, args: dict,
                   now: float) -> dict | Final:
-        tab = str(args.get("tab", ""))
+        tab = str(args.get("tab") or "")
+        tab = next((t for t in client.tabs if t.lower() == tab.lower()), tab)
         try:
             if name == "lookup_rows":
-                return lookup_rows(self.sheets, client, caller, tab, str(args.get("query", "")))
+                return lookup_rows(self.sheets, client, caller, tab, str(args.get("query") or ""))
             if name == "total_rows":
-                return total_rows(self.sheets, client, caller, tab, **{k: str(args.get(k, "")) for k in TOTAL_ARGS})
+                return total_rows(self.sheets, client, caller, tab, **{k: str(args.get(k) or "") for k in TOTAL_ARGS})
             if name == "propose_row":
                 values = args.get("values")
                 result = build_row(self.sheets, client, caller, tab, values if isinstance(values, list) else [])
@@ -203,7 +220,7 @@ class Bot:
                 self.store.put_pending(client.id, m.chat_id, m.sender_id, tab, result["row"], now + PENDING_TTL)
                 return Final(proposal_text(tab, result["row"]))
             if name == "handoff":
-                return self._handoff(client, m, str(args.get("reason", "")), now)
+                return self._handoff(client, m, str(args.get("reason") or ""), now)
         except Exception:
             log.exception("tool_failed tool=%s client=%s", name, client.id)
             return {"error": "The sheet couldn't be reached right now."}
@@ -219,6 +236,13 @@ class Bot:
         who = "a staff member of the business" if caller.role == "staff" else "a customer"
         where = ("a WhatsApp group; each message starts with the sender's name" if m.is_group
                  else "a private WhatsApp chat")
+        pending = self.store.get_pending(client.id, m.chat_id, m.sender_id, now)
+        pending_rule = ""
+        if pending:
+            tab, _ = pending
+            pending_rule = (f"- This customer has an unconfirmed proposal for {tab}. Their YES or NO confirms "
+                            "or cancels it, so don't ask other yes/no questions; to change it, call propose_row "
+                            "again with the whole row.\n")
         return (
             f"You are {client.bot_name}, the AI assistant of {client.business}, chatting in {where}. "
             f"You are talking to {who}.\n"
@@ -228,10 +252,13 @@ class Bot:
             "- Reply in the user's language, briefly, like a WhatsApp message.\n"
             "- Never invent prices, stock, orders or policies. Use the knowledge below or look it up with "
             "lookup_rows. If you can't find it, say so and offer to pass it to the team with handoff.\n"
+            "- If you asked for a contact number and the user sends one, call handoff again with that "
+            "number in the reason.\n"
             "- For any total or count (spending in June, items sold this month), call total_rows and report "
             "its numbers, including skipped rows. Never add numbers up yourself.\n"
             "- To save an order, lead, booking or expense, call propose_row. Never say anything is saved; "
             "the system confirms it.\n"
+            f"{pending_rule}"
             "- Write dates as YYYY-MM-DD.\n"
             f"- Current time: {local:%A %d %B %Y %H:%M} ({client.timezone}).\n\n"
             f"Sheet tabs you can use:\n{describe_tabs(client, caller, self.sheets) or '(none)'}\n\n"
@@ -303,4 +330,6 @@ class Bot:
             self._deliver(client, "waha", client.staff_alert_chat, client.staff_alert_chat,
                           f"🙋 {who} needs a person: {m.text[:300]}")
         ack = "I've passed this to the team. Someone will get back to you soon."
-        return Final(ack if m.sender_phone else f"{ack} What's the best number to reach you on?")
+        if m.sender_phone or len(digits(m.text)) >= 9:
+            return Final(ack)
+        return Final(f"{ack} What's the best number to reach you on?")

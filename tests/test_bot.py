@@ -1,6 +1,6 @@
-from app.bot import FALLBACK
+from app.bot import FALLBACK, role_for
 from app.whatsapp import SendError
-from tests.fakes import call, incoming, make_bot, say, texts
+from tests.fakes import call, incoming, make_bot, make_client, say, texts
 
 
 def test_first_reply_in_a_chat_carries_the_ai_intro_once():
@@ -65,6 +65,20 @@ def test_lookup_result_goes_back_to_the_model():
     assert tool_message["role"] == "tool" and tool_message["tool_call_id"] == "call_lookup_rows"
     assert "2200" in tool_message["content"]
     assert texts(bot.meta)[-1].endswith("Carrot cake is Rs 2200.")
+
+
+def test_lowercase_tab_name_and_null_query_still_resolve():
+    bot, llm = make_bot(call("lookup_rows", tab="prices", query=None), say("Rs 2500 and Rs 2200."))
+    bot.handle(incoming("what are your prices?"))
+    tool_message = llm.calls[1][-1]
+    assert tool_message["tool_call_id"] == "call_lookup_rows"
+    assert "Chocolate cake" in tool_message["content"] and "Unknown tab" not in tool_message["content"]
+
+
+def test_staff_role_needs_the_full_number_not_just_the_last_9_digits():
+    client = make_client()
+    foreign = incoming("hi", phone="13001111111", channel="waha")  # shares last 9 digits with staff "923001111111"
+    assert role_for(client, foreign) == "customer"
 
 
 def test_staff_member_in_a_customer_group_gets_customer_access():

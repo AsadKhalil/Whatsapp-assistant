@@ -72,8 +72,27 @@ def test_handoff_asks_for_a_number_when_it_is_hidden():
     assert texts(bot.meta)[-1].endswith("What's the best number to reach you on?")
 
 
+def test_hidden_phone_customer_can_give_a_number_after_being_asked():
+    bot, _ = make_bot(call("handoff", reason="Question"),
+                      call("handoff", reason="Call back on 0300 1234567"))
+    bot.handle(incoming("a person please", phone=None))
+    assert texts(bot.meta)[-1].endswith("What's the best number to reach you on?")
+    bot.handle(incoming("0300 1234567", phone=None))
+    rows = [row for tab, row in bot.sheets.appended if tab == "Handoffs"]
+    assert len(rows) == 2
+    assert rows[1]["Question"] == "0300 1234567" and rows[1]["Reason"] == "Call back on 0300 1234567"
+    assert not texts(bot.meta)[-1].endswith("number to reach you on?")
+
+
 def test_model_failure_sends_the_fallback_and_hands_off():
     bot, _ = make_bot(fail=True)
+    bot.handle(incoming("hi"))
+    assert texts(bot.meta)[-1].endswith(FALLBACK)
+    assert bot.sheets.appended[0][0] == "Handoffs"
+
+
+def test_empty_model_reply_sends_the_fallback_and_hands_off():
+    bot, _ = make_bot(say(""))
     bot.handle(incoming("hi"))
     assert texts(bot.meta)[-1].endswith(FALLBACK)
     assert bot.sheets.appended[0][0] == "Handoffs"
