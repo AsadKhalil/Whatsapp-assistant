@@ -65,14 +65,14 @@ Group / staff → WAHA           → POST /webhooks/waha ┴→ Incoming → bot
 
 ## 5. Message pipeline — `bot.handle(incoming)`
 
-1. **Save the message.** The unique key `(channel, message id)` drops Meta/WAHA retries. The bot's own echoes are saved as bot messages and never answered.
-2. **Voice notes.** Download the note. If it is over 1 MB (about 5 minutes), send a polite reply composed by code. Otherwise transcribe it and store the transcript as the message text. Every voice note is transcribed, including group notes the bot won't answer, so history stays complete.
+1. **Save the message.** The unique key `(client, channel, message id)` drops Meta/WAHA retries. The bot's own echoes are saved as bot messages and never answered.
+2. **Voice notes.** Download the note as soon as the message arrives, before per-chat processing, so Meta's short-lived download URLs stay fresh. If it is over 1 MB (about 5 minutes), send a polite reply composed by code (in groups, only when the bot is addressed). Otherwise transcribe it and store the transcript as the message text. Every voice note is transcribed, including group notes the bot won't answer, so history stays complete.
 3. **Decide whether to reply.**
    - In 1:1 chats, always.
    - In groups, only when the bot is @mentioned or someone replies to one of its messages.
-   - Loop breaker: at most 6 bot replies per chat per 10 minutes.
+   - Loop breaker: at most 6 bot replies per chat per 10 minutes, whatever composed the reply (model answers, confirmations and voice-note failures alike).
 4. **Pending confirmation.** This applies if the sender has an unexpired pending write in this chat:
-   - A message that is exactly a yes-word executes it. Yes-words: "yes", "y", "confirm", "haan", "ji", "نعم", "ہاں", "👍".
+   - A message that is exactly a yes-word executes it. Yes-words: "yes", "y", "yep", "yes please", "confirm", "haan", "han", "ji", "jee", "نعم", "ہاں", "جی", "👍". ("ok" is deliberately not one: people say it as acknowledgement.)
    - A no-word cancels it.
    - Anything else goes to the model. A new proposal replaces the old one.
 5. **Build the context.**
@@ -120,7 +120,8 @@ Group / staff → WAHA           → POST /webhooks/waha ┴→ Incoming → bot
 
 - **Bad webhook signature:** respond 403 and store nothing.
 - **Processing errors:** logged. Meta and WAHA always get a 200 once the signature is valid.
-- **Model call:** 30 s timeout and one retry. After that, send the code-composed fallback ("Sorry, I'm having trouble right now. The team will get back to you.") and add a handoff row.
+- **Model call:** 30 s timeout and one retry. After that, send the code-composed fallback ("Sorry, I'm having trouble right now. The team will get back to you.") and add a handoff row. The same fallback and handoff happen when the tool-loop budget (4 calls) runs out without an answer.
+- **Restarts:** there is no queue; a restart can lose messages that were accepted but not yet processed, so deploys belong in quiet hours.
 - **Sheets errors inside tools:** return `{"error": ...}` to the model. It must not claim success; success text is composed by code anyway.
 - **Append failure:** keep the pending write and reply "Couldn't save that, reply YES to try again."
 - **Send errors:**
@@ -183,3 +184,4 @@ Group / staff → WAHA           → POST /webhooks/waha ┴→ Incoming → bot
 - **Sheets:** appends use `RAW` input, so text sent from chat can never run as a formula.
 - **Tooling (from the plan dry run):** ruff runs with an explicit rule set (`E4, E7, E9, F`), because ruff 0.16 widened its defaults. The openai SDK floor is `>=3.19`, the version the dry run passed on.
 - **Totals and staff writes** (owner decisions after the plan was written): the `total_rows` tool (section 5), staff rows saving at once (section 6), and the client's `date_format` for dates typed in by hand.
+- **Plan review fixes (2026-09-23):** the loop breaker gates every reply the bot sends, code-composed ones included (section 5); webhook bodies that fail to parse still get a 200 once the signature is valid (section 8); message dedupe is scoped per client (section 5); voice media is downloaded before per-chat processing (section 5); "ok" is left off the yes-word list (section 5); a burnt tool budget hands off like a model failure (section 8).
