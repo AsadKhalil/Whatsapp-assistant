@@ -60,6 +60,12 @@ def test_meta_retries_a_rate_limit_once_and_raises_other_errors():
     with pytest.raises(SendError, match="131047"):
         MetaClient(SETTINGS, mock(window_closed), sleep=lambda s: None).send_text("1", "1", "x")
 
+    def unreachable(request):
+        raise httpx.ConnectError("connection refused")
+
+    with pytest.raises(SendError, match="unreachable"):
+        MetaClient(SETTINGS, mock(unreachable), sleep=lambda s: None).send_text("1", "1", "x")
+
 
 def test_meta_media_download_is_two_authenticated_steps():
     def handler(request):

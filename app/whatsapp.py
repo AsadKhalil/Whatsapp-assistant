@@ -190,10 +190,13 @@ class MetaClient:
         if reply_to:
             body["context"] = {"message_id": reply_to}
         url = f"{self._base}/{phone_number_id}/messages"
-        r = self._http.post(url, json=body, headers=self._auth)
-        if r.status_code == 429 or (r.status_code >= 400 and _meta_error_code(r) == 130429):
-            self._sleep(2)
+        try:
             r = self._http.post(url, json=body, headers=self._auth)
+            if r.status_code == 429 or (r.status_code >= 400 and _meta_error_code(r) == 130429):
+                self._sleep(2)
+                r = self._http.post(url, json=body, headers=self._auth)
+        except httpx.HTTPError as e:
+            raise SendError(f"meta unreachable: {type(e).__name__}") from e
         if r.status_code >= 400:
             raise SendError(f"meta status={r.status_code} code={_meta_error_code(r)}")
         return ((r.json().get("messages") or [{}])[0]).get("id")
