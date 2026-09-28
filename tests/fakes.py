@@ -1,7 +1,10 @@
 """In-memory stand-ins shared by the tests and the eval runner. Later tasks append to this file."""
 from __future__ import annotations
 
+import json
+
 from app.config import Client, TabRule
+from app.llm import ModelReply, ToolCall
 
 
 def make_client(**overrides) -> Client:
@@ -77,3 +80,33 @@ def bakery_sheets() -> FakeSheets:
         },
         headers={"Handoffs": ["Time", "Name", "Phone", "Chat", "Question", "Reason"]},
     )
+
+
+def say(text: str) -> ModelReply:
+    return ModelReply(text=text, tool_calls=[], message={"role": "assistant", "content": text})
+
+
+def call(name: str, **arguments) -> ModelReply:
+    tool_call = ToolCall(id=f"call_{name}", name=name, arguments=arguments)
+    message = {"role": "assistant", "content": None, "tool_calls": [
+        {"id": tool_call.id, "type": "function", "function": {"name": name, "arguments": json.dumps(arguments)}}]}
+    return ModelReply(text="", tool_calls=[tool_call], message=message)
+
+
+class ScriptedLLM:
+    """Plays back queued replies and records what the bot sent."""
+
+    def __init__(self, *replies: ModelReply, transcript: str = "", fail: bool = False) -> None:
+        self.replies = list(replies)
+        self.transcript = transcript
+        self.fail = fail
+        self.calls: list[list] = []
+
+    def complete(self, messages: list, tools: list[dict]) -> ModelReply:
+        self.calls.append(list(messages))
+        if self.fail:
+            raise RuntimeError("model is down")
+        return self.replies.pop(0)
+
+    def transcribe(self, audio: bytes) -> str:
+        return self.transcript
