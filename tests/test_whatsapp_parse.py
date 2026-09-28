@@ -118,6 +118,11 @@ def test_waha_direct_chat_image_own_message_join_and_unknown_session():
     assert parse_waha(waha_message(event="session.status"), BY_SESSION) is None
 
 
+def test_status_broadcast_and_newsletter_chats_are_ignored():
+    assert parse_waha(waha_message(chat="status@broadcast", mentioned=()), BY_SESSION) is None
+    assert parse_waha(waha_message(chat="123456@newsletter", mentioned=()), BY_SESSION) is None
+
+
 def test_signatures():
     body = b'{"x": 1}'
     good = "sha256=" + hmac.new(b"app-secret", body, hashlib.sha256).hexdigest()

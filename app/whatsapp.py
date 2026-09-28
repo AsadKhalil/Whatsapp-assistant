@@ -137,6 +137,8 @@ def parse_waha(envelope: dict, by_session: dict[str, Client]) -> Incoming | Grou
     if not str(p.get("id") or ""):
         return None  # without an id, the next id-less event would dedupe against this one
     chat = str(p.get("from") or "")
+    if not chat.endswith(("@g.us", "@c.us", "@s.whatsapp.net", "@lid")):
+        return None  # contacts' Status posts (status@broadcast) and channels (...@newsletter) aren't chats
     is_group = chat.endswith("@g.us")
     sender = str((p.get("participant") if is_group else chat) or "")
     body = str(p.get("body") or "")
@@ -199,7 +201,10 @@ class MetaClient:
             raise SendError(f"meta unreachable: {type(e).__name__}") from e
         if r.status_code >= 400:
             raise SendError(f"meta status={r.status_code} code={_meta_error_code(r)}")
-        return ((r.json().get("messages") or [{}])[0]).get("id")
+        try:
+            return ((r.json().get("messages") or [{}])[0]).get("id")
+        except ValueError:
+            return None  # sent, but a non-JSON 2xx body means the provider's id is unknown
 
     def download(self, media_id: str) -> bytes:
         info = self._http.get(f"{self._base}/{media_id}", headers=self._auth)
@@ -232,7 +237,10 @@ class WahaClient:
             raise SendError(f"waha unreachable: {type(e).__name__}") from e
         if r.status_code >= 400:
             raise SendError(f"waha status={r.status_code}")
-        return _waha_id(r.json())
+        try:
+            return _waha_id(r.json())
+        except ValueError:
+            return None  # sent, but a non-JSON 2xx body means the provider's id is unknown
 
     def download(self, url: str) -> bytes:
         r = self._http.get(url, headers=self._auth)

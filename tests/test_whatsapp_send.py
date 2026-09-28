@@ -98,6 +98,13 @@ def test_waha_send_download_and_status():
     assert waha.status("acme") == "WORKING"
 
 
+def test_non_json_2xx_body_still_counts_as_sent():
+    meta = MetaClient(SETTINGS, mock(lambda request: httpx.Response(200, content=b"not json")))
+    assert meta.send_text("1", "1", "x") is None
+    waha = WahaClient(SETTINGS, mock(lambda request: httpx.Response(200, content=b"not json")))
+    assert waha.send_text("acme", "123@g.us", "Hi") is None
+
+
 def test_waha_errors_and_id_shapes():
     down = WahaClient(SETTINGS, mock(lambda request: httpx.Response(500)))
     with pytest.raises(SendError):
