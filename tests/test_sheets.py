@@ -1,4 +1,6 @@
-from app.sheets import Sheets
+import gspread
+
+from app.sheets import Sheets, service_account_email, sheet_error
 from app.tools import Caller, lookup_rows, total_rows
 from tests.fakes import make_client
 
@@ -24,9 +26,14 @@ class FakeWorksheet:
 class FakeBook:
     def __init__(self, tabs):
         self.tabs = tabs
+        for title, ws in tabs.items():
+            ws.title = title
 
     def worksheet(self, tab):
         return self.tabs[tab]
+
+    def worksheets(self):
+        return list(self.tabs.values())
 
 
 class FakeGC:
@@ -85,3 +92,25 @@ def test_blank_middle_rows_are_dropped_before_counting():
     r = total_rows(sheets, make_client(), STAFF, "Expenses", sum_column="Amount")
     assert r["rows_counted"] == 2 and r["total"] == 300
     assert r["skipped"] == {"unreadable_date": 0, "unreadable_number": 0}
+
+
+def test_tab_headers_list_every_tab_with_its_trimmed_header_row():
+    sheets = Sheets(FakeGC({"Prices": FakeWorksheet([["Item ", "Price"]]), "Empty": FakeWorksheet([[]])}))
+    assert sheets.tab_headers("s") == {"Prices": ["Item", "Price"], "Empty": []}
+
+
+def test_service_account_email_and_friendly_sheet_errors(tmp_path):
+    key = tmp_path / "key.json"
+    key.write_text('{"client_email": "bot@proj.iam.gserviceaccount.com"}', encoding="utf-8")
+    email = service_account_email(str(key))
+    assert email == "bot@proj.iam.gserviceaccount.com"
+    assert service_account_email(str(tmp_path / "missing.json")) == ""
+    assert "isn't shared with bot@proj" in sheet_error(gspread.exceptions.SpreadsheetNotFound(), email)
+
+    class Forbidden(Exception):
+        code = 403
+
+    assert sheet_error(Forbidden(), email) == "Share the Sheet with bot@proj.iam.gserviceaccount.com as Editor."
+    assert sheet_error(gspread.exceptions.WorksheetNotFound("Orders"), email) == "Tab 'Orders' is not in the Sheet."
+    assert "couldn't be reached" in sheet_error(RuntimeError("down"), "")
+    assert "the service account" in sheet_error(gspread.exceptions.SpreadsheetNotFound(), "")

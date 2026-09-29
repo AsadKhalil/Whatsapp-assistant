@@ -133,3 +133,24 @@ class Store:
             return True
         except sqlite3.Error:
             return False
+
+    def conversations(self, client_id: str, limit: int = 100) -> list[sqlite3.Row]:
+        """One row per chat for the dashboard: newest first, with the latest human sender's name."""
+        return self._all(
+            "SELECT chat_id, channel, MAX(created_at) AS last_at, COUNT(*) AS messages,"
+            " (SELECT h.sender_name FROM messages h WHERE h.client_id = m.client_id AND h.chat_id = m.chat_id"
+            "  AND h.from_bot = 0 AND h.sender_name != '' ORDER BY h.created_at DESC, h.id DESC LIMIT 1) AS name"
+            " FROM messages m WHERE client_id = ? GROUP BY chat_id, channel ORDER BY last_at DESC LIMIT ?",
+            (client_id, limit))
+
+    def chat(self, client_id: str, chat_id: str, limit: int = 200) -> list[sqlite3.Row]:
+        rows = self._all(
+            "SELECT sender_name, text, from_bot, created_at, channel FROM messages"
+            " WHERE client_id = ? AND chat_id = ? ORDER BY created_at DESC, id DESC LIMIT ?",
+            (client_id, chat_id, limit))
+        return rows[::-1]
+
+    def replies_since(self, client_id: str, since: float) -> dict[str, int]:
+        rows = self._all("SELECT channel, COUNT(*) AS n FROM messages WHERE client_id = ? AND from_bot = 1"
+                         " AND created_at >= ? GROUP BY channel", (client_id, since))
+        return {"meta": 0, "waha": 0, **{r["channel"]: r["n"] for r in rows}}

@@ -66,3 +66,27 @@ def test_retention_backup_and_health(tmp_path):
     s.backup(str(dest))  # a second backup on the same day overwrites
     assert dest.exists()
     assert s.writable() is True
+
+
+def test_conversations_and_chat_history_are_per_business():
+    s = Store(":memory:")
+    s.save_message("acme", "meta", "1", "user-ali", "user-ali", "Ali", "hi", False, 10.0)
+    s.save_message("acme", "meta", "2", "user-ali", "bot", "Sara", "hello", True, 11.0)
+    s.save_message("acme", "waha", "3", "g@g.us", "p1", "Bilal", "@Sara hi", False, 20.0)
+    s.save_message("other", "meta", "4", "user-zed", "user-zed", "Zed", "psst", False, 30.0)
+    rows = s.conversations("acme")
+    assert [(r["chat_id"], r["channel"], r["messages"], r["name"], r["last_at"]) for r in rows] == [
+        ("g@g.us", "waha", 1, "Bilal", 20.0), ("user-ali", "meta", 2, "Ali", 11.0)]
+    assert [(r["sender_name"], r["text"], r["from_bot"]) for r in s.chat("acme", "user-ali")] == [
+        ("Ali", "hi", 0), ("Sara", "hello", 1)]
+    assert s.chat("acme", "user-zed") == []
+
+
+def test_replies_since_counts_bot_messages_per_channel():
+    s = Store(":memory:")
+    s.save_message("acme", "meta", "1", "c", "bot", "Sara", "a", True, 100.0)
+    s.save_message("acme", "waha", "2", "g", "bot", "Sara", "b", True, 100.0)
+    s.save_message("acme", "waha", "3", "g", "bot", "Sara", "c", True, 10.0)
+    s.save_message("acme", "meta", "4", "c", "u", "Ali", "d", False, 100.0)
+    assert s.replies_since("acme", 50.0) == {"meta": 1, "waha": 1}
+    assert s.replies_since("other", 0.0) == {"meta": 0, "waha": 0}

@@ -1,8 +1,10 @@
 """Google Sheets through a service account: each client shares their Sheet with its email."""
 from __future__ import annotations
 
+import json
 import threading
 import time
+from pathlib import Path
 from typing import Any, Callable
 
 import gspread
@@ -58,3 +60,29 @@ class Sheets:
             return "\n".join(line for line in lines if line)
 
         return self._cached(("knowledge", sheet_id, tab), load, now)
+
+    def tab_headers(self, sheet_id: str) -> dict[str, list[str]]:
+        """Every tab's title with its trimmed header row, in the Sheet's order ("Check access")."""
+        book = self._gc.open_by_key(sheet_id)
+        return {ws.title: [str(h).strip() for h in ws.row_values(1)] for ws in book.worksheets()}
+
+
+def service_account_email(path: str) -> str:
+    """The address businesses share their Sheet with ('' when the key file can't be read)."""
+    try:
+        return str(json.loads(Path(path).read_text(encoding="utf-8")).get("client_email", ""))
+    except (OSError, ValueError):
+        return ""
+
+
+def sheet_error(error: Exception, email: str) -> str:
+    """A Google Sheets failure as one sentence telling the person what to do."""
+    who = email or "the service account"
+    code = getattr(error, "code", None) or getattr(getattr(error, "response", None), "status_code", None)
+    if isinstance(error, gspread.exceptions.SpreadsheetNotFound) or code == 404:
+        return f"No Sheet with that id, or it isn't shared with {who}."
+    if code == 403:
+        return f"Share the Sheet with {who} as Editor."
+    if isinstance(error, gspread.exceptions.WorksheetNotFound):
+        return f"Tab {str(error)!r} is not in the Sheet."
+    return "Google Sheets couldn't be reached right now."
