@@ -8,5 +8,18 @@
     <li><a href="{{ base }}/staff">Staff &amp; groups</a></li>
     <li><a href="{{ base }}/sheet">Sheet</a></li>
     <li><a href="{{ base }}/chats">Chats</a></li>
+    {% if is_admin %}
+    <li><a href="{{ base }}/meta">Official number</a></li>
+    <li><a href="{{ base }}/number">Group number</a></li>
+    <li><a href="{{ base }}/logins">Logins</a></li>
+    <li><a href="{{ base }}/audit">Audit log</a></li>
+    <li>
+      <form method="post" action="{{ base }}/pause" class="inline">
+        <input type="hidden" name="csrf" value="{{ csrf }}">
+        <input type="hidden" name="active" value="{{ '0' if business.active else '1' }}">
+        <button type="submit" class="secondary outline">{{ "Pause business" if business.active else "Resume business" }}</button>
+      </form>
+    </li>
+    {% endif %}
   </ul>
 </nav>

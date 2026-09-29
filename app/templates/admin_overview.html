@@ -1,0 +1,21 @@
+{% extends "base.html" %}
+{% block content %}
+<h1>Businesses</h1>
+<p><a href="/admin/new" role="button">Add a business</a></p>
+{% if not rows %}<p>No businesses yet.</p>{% else %}
+<table>
+  <thead><tr><th>Business</th><th>Official number</th><th>Group number</th><th>Official replies this month</th><th>Group replies this month</th></tr></thead>
+  <tbody>
+  {% for r in rows %}
+  <tr>
+    <td><a href="/admin/b/{{ r.b.id }}">{{ r.b.config.business }}</a>{% if not r.b.active %} <span class="badge bad">paused</span>{% endif %}</td>
+    <td>{% if r.b.keys_unreadable %}<span class="badge bad">re-enter keys</span>{% elif r.b.meta_phone_number_id and r.b.has_meta_token %}<span class="badge good">keys saved</span>{% else %}not set{% endif %}</td>
+    <td><span class="badge {{ 'good' if r.group == 'WORKING' else 'bad' }}">{{ r.group }}</span></td>
+    <td>{{ r.replies.meta }}</td>
+    <td>{{ r.replies.waha }}</td>
+  </tr>
+  {% endfor %}
+  </tbody>
+</table>
+{% endif %}
+{% endblock %}

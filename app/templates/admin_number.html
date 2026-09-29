@@ -1,0 +1,16 @@
+{% extends "base.html" %}
+{% block content %}
+<h1>Group number</h1>
+<p>Now: {% if business.number %}<strong>{{ business.number }}</strong>{% else %}none{% endif %}</p>
+<form method="post">
+  <input type="hidden" name="csrf" value="{{ csrf }}">
+  <label>Use this purchased number
+    <select name="session">
+      <option value="">(none)</option>
+      {% for n in numbers %}<option value="{{ n.session }}"{% if n.session == business.number %} selected{% endif %}>{{ n.session }}{% if n.phone %} (+{{ n.phone }}){% endif %}</option>{% endfor %}
+    </select>
+  </label>
+  <button type="submit">Save</button>
+</form>
+<p><a href="/admin/numbers">Manage purchased numbers</a></p>
+{% endblock %}
