@@ -133,12 +133,14 @@ class RateLimit:
         self._lock = threading.Lock()
         self._tries: dict[str, deque[float]] = {}
         self._until: dict[str, float] = {}
+        self._next_sweep = 0.0
 
     def attempt(self, key: str, now: float) -> bool:
         """Record a try; False (nothing recorded) while the key is paused or has used up its tries."""
         with self._lock:
-            if len(self._tries) + len(self._until) > 10_000:
+            if now >= self._next_sweep:  # at most one sweep a minute, however many keys are live
                 self._sweep(now)
+                self._next_sweep = now + 60
             if self._until.get(key, 0.0) > now:
                 return False
             tries = self._tries.setdefault(key, deque())

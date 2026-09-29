@@ -143,6 +143,13 @@ def test_rate_limit_allows_five_tries_then_pauses():
     assert [limits.attempt("k", 0.0) for _ in range(7)] == [True] * 5 + [False, False]
 
 
+def test_rate_limit_forgets_expired_keys():
+    limits = RateLimit()
+    assert limits.attempt("old", 0.0)
+    assert limits.attempt("new", 15 * 60 + 61)  # a minute has passed, so this attempt sweeps first
+    assert "old" not in limits._tries and "new" in limits._tries
+
+
 def test_rate_limit_is_safe_under_concurrent_attempts():
     limits = RateLimit()
     barrier = threading.Barrier(20)
