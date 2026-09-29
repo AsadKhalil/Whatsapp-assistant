@@ -1,13 +1,13 @@
 # WhatsApp Assistant Engine
 
-A WhatsApp AI assistant for one business at a time:
+A WhatsApp AI assistant for small businesses, run for many businesses from one server:
 - **Customer 1:1 chats** run on the business's official number (Meta Cloud API).
 - **Group @mentions** run on a purchased number linked through WAHA.
 - **Answers** come from the business's Google Sheet. Customers' new rows are added only after they reply YES;
   staff rows are saved at once.
 - **Voice notes** are transcribed.
 
-Design: `docs/superpowers/specs/2026-09-23-whatsapp-engine-design.md`.
+Design: `docs/superpowers/specs/2026-09-23-whatsapp-engine-design.md` (engine) and `docs/superpowers/specs/2026-09-28-dashboard-admin-design.md` (dashboard).
 
 > **Risk:** WAHA drives WhatsApp Web on a normal account. That breaks WhatsApp's Terms of Service, and the purchased number can be banned without warning. Keep the group bot on its own number, never the client's main number. Sell it as a done-for-you add-on with the risk written into the agreement.
 
@@ -20,8 +20,21 @@ uv run ruff check .
 ```
 
 Run against real services with `uv run --env-file .env uvicorn app.main:create_app --factory --port 8000`. It needs
-`.env`, `clients.yaml` and the Google key in `secrets/`. Run a single worker (the default): the per-chat locks and
+`.env` (with `SECRET_KEY`), the Google key in `secrets/` and, on the first start only, `clients.yaml`. Run a single worker (the default): the per-chat locks and
 the SQLite connection live in one process.
+
+## The dashboard
+
+`https://$DOMAIN/` is a web dashboard:
+- **Admins** see every business and number: add a business, paste its Meta keys, link purchased numbers by QR code, invite logins, pause a business, and read chats and the audit log.
+- **Each business** logs in to change its bot settings, staff, groups and Sheet permissions, and to read its chats.
+
+1. Set `SECRET_KEY` in `.env` (`openssl rand -hex 32`). The engine won't start without it. It encrypts the Meta keys stored in the database, so changing it means re-entering them.
+2. Run `docker compose up -d --build`, then create your admin login: `docker compose exec engine python -m app.cli create-admin you@example.com`. Open the printed link, set a password, and set up two-step login with an authenticator app.
+3. Locked out? `docker compose exec engine python -m app.cli admin-link you@example.com` prints a fresh link (it resets the password and the two-step login).
+4. Each business has its own Meta webhook address, `https://$DOMAIN/webhooks/meta/<business-id>`, shown with its verify token on the business's *Official number* page.
+
+Upgrading from `clients.yaml`: the first start with an empty dashboard database imports `clients.yaml` and the `.env` Meta keys once. After that the dashboard is the source of truth and `clients.yaml` is ignored. The old address `https://$DOMAIN/webhooks/meta` keeps working for businesses on the `.env` Meta app.
 
 ## One-time setup for a pilot client
 
@@ -63,7 +76,7 @@ New to servers? Follow the step-by-step [setup guide](docs/setup-guide.md).
    ```
 3. Open `http://localhost:3000/dashboard` and scan the QR code with the purchased phone (Linked devices).
 4. **Keep that phone online at least every 14 days.** Otherwise WhatsApp logs the bot out.
-5. Add the number to the client's groups. The bot introduces itself on join. List group ids with `GET /api/sweetbakes/groups`. Put the staff group ids in `staff_chats` and `staff_alert_chat`, then run `docker compose restart engine`.
+5. Add the number to the client's groups. The bot introduces itself on join. Then, in the dashboard, open the business → **Staff & groups**, tick the staff group and pick the group that gets "needs a person" alerts. No restart needed.
 
 ### 5. Monitoring
 Point a free uptime monitor (e.g. UptimeRobot) at `https://$DOMAIN/health`. It turns red if the database isn't writable or the WAHA session isn't `WORKING`.

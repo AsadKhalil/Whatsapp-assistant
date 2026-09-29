@@ -1,5 +1,5 @@
 {$DOMAIN} {
-	@public path /webhooks/meta /health
+	@public path / /login /login/* /logout /invite/* /admin /admin/* /app /app/* /static/* /webhooks/meta /webhooks/meta/* /health
 	handle @public {
 		request_body {
 			max_size 1MB

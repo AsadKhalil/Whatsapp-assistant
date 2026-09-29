@@ -8,6 +8,7 @@ services:
       CLIENTS_FILE: /config/clients.yaml
       GOOGLE_SERVICE_ACCOUNT_FILE: /config/google-service-account.json
       WAHA_URL: http://waha:3000
+      PUBLIC_URL: https://${DOMAIN}  # the dashboard's webhook addresses and invite links
     volumes:
       - ./data:/data
       - ./clients.yaml:/config/clients.yaml:ro

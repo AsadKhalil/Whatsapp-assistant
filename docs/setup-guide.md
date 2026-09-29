@@ -31,9 +31,10 @@ named **Sara**. Replace those names, `+92` numbers and `Asia/Karachi` timezone w
 10. [Part H: monitoring and backups](#10-part-h-monitoring-and-backups)
 11. [Part I: test everything](#11-part-i-test-everything)
 12. [Part J: choosing the AI model](#12-part-j-choosing-the-ai-model)
-13. [Day-to-day tasks](#13-day-to-day-tasks)
-14. [Troubleshooting](#14-troubleshooting)
-15. [Glossary](#15-glossary)
+13. [Part K: the dashboard](#13-part-k-the-dashboard)
+14. [Day-to-day tasks](#14-day-to-day-tasks)
+15. [Troubleshooting](#15-troubleshooting)
+16. [Glossary](#16-glossary)
 
 ## 1. What You're Building
 
@@ -144,7 +145,7 @@ allowed to read and write the client's Sheet without ever knowing the client's G
 
 ## 4. Part B: clients.yaml, Field by Field
 
-`clients.yaml` holds every setting for every client — the engine reads it once at startup. It's listed in
+`clients.yaml` holds the settings for your first client. On its very first start the engine copies them into its database; after that you change settings in the dashboard (Part K), and later edits to `clients.yaml` are ignored. It's listed in
 `.gitignore` on purpose (it can contain real phone numbers), so you create your own copy.
 
 1. In your project folder, copy `clients.example.yaml` to `clients.yaml`.
@@ -359,7 +360,7 @@ These go in `.env` (created properly in Part E). From `.env.example`:
    ```
    In `nano`: move around with the arrow keys, type to edit, **Ctrl+O then Enter** to save, **Ctrl+X** to
    exit. Fill in every value:
-   - `LOG_HASH_KEY`, `WAHA_API_KEY`, `WAHA_WEBHOOK_SECRET`, `WAHA_DASHBOARD_PASSWORD`: random secrets. Open a
+   - `LOG_HASH_KEY`, `SECRET_KEY`, `WAHA_API_KEY`, `WAHA_WEBHOOK_SECRET`, `WAHA_DASHBOARD_PASSWORD`: random secrets. Open a
      second terminal or just run this first and copy each result in:
      ```bash
      openssl rand -hex 32
@@ -420,6 +421,8 @@ These go in `.env` (created properly in Part E). From `.env.example`:
 
 ## 8. Part F: Connect Meta's Webhook
 
+> **With the dashboard (Part K):** every business also has its own webhook address, shown with its verify token on the business's **Official number** page. This first business can keep the address below: it keeps working for the business whose Meta keys are in `.env`. Businesses you add later must use their own address.
+
 Now that the server is live with a real `https://` address, go back to the client's Meta app (Part C) and
 point it at your server.
 
@@ -452,6 +455,8 @@ point it at your server.
    either works.
 
 ### Link WAHA to the phone
+
+> **Your first business's number** is linked here, over the SSH tunnel, with the session name from `clients.yaml`. For every later business, add and link its number in the dashboard instead (Part K, **Numbers → Add a number**): no tunnel needed.
 
 4. Open an SSH tunnel from your laptop — this makes the server's WAHA dashboard reachable from your laptop's
    browser, without exposing it to the internet. Keep this window open for the rest of this section.
@@ -486,26 +491,14 @@ point it at your server.
 
 8. On the spare phone, add the number to each of the client's WhatsApp groups, the normal way (add
    participant). The bot posts its AI-disclosure intro automatically the moment it's added to a group.
-9. List the client's group ids so you can identify the staff group:
-   **bash, on the server (same SSH window):**
-   ```bash
-   curl http://localhost:3000/api/sweetbakes/groups -H "X-Api-Key: $WAHA_API_KEY"
-   ```
-   - You should see: a JSON list of groups, each with an `id` ending in `@g.us`.
-10. Back on your **laptop**, edit `clients.yaml` and put the staff group's id into both `staff_chats` and
-    `staff_alert_chat`, then re-upload it and restart the engine:
-    **PowerShell, on your laptop:**
-    ```powershell
-    scp clients.yaml root@your.server.ip:~/Whatsapp-assistant/clients.yaml
-    ```
-    **bash, on the server:**
-    ```bash
-    docker compose restart engine
-    ```
-11. Check `https://<your-domain>/health` again.
+9. Tell the bot which group is the staff group, in the dashboard. If you haven't made your admin login yet, do Part K, "Create your admin login", now. Then open `https://<your-domain>/admin` → your business → **Staff & groups**, tick **Staff group** next to the staff group, pick the same group under **Gets "needs a person" alerts**, and press **Save**.
+   - You should see: "Saved." The bot uses it from the next message; no restart needed.
+10. Check `https://<your-domain>/health` again.
     - You should see: `{"ok": true, ...}` now that the WAHA session is `WORKING`.
 
 ### If the purchased number gets banned
+
+> **With the dashboard (Part K):** step 2 is easier: open **Numbers** → the number → **Log out**, then **Relink**, and scan the new QR code with the new phone. No SSH tunnel needed.
 
 This is the real risk described in the warning above. If it happens:
 
@@ -623,15 +616,71 @@ playing 15 scripted test conversations against each one.
    docker compose up -d
    ```
 
-## 13. Day-to-Day Tasks
+## 13. Part K: The Dashboard
+
+The engine has a web dashboard at `https://<your-domain>/`. **You** (the admin) manage every business and number there. **Each business** gets its own login to change its bot settings, staff and Sheet permissions, and to read its chats.
+
+### Create your admin login (once)
+
+1. Check that `.env` has `SECRET_KEY` (Part E).
+   **bash, on the server:**
+   ```bash
+   cd Whatsapp-assistant
+   grep SECRET_KEY .env
+   ```
+   You should see: `SECRET_KEY=` followed by a long random value. If it's empty, put one in with `openssl rand -hex 32` and run `docker compose up -d`.
+   > **Warning:** keep `SECRET_KEY` safe and don't change it. It encrypts the Meta keys saved in the dashboard; if it changes, you must re-enter every business's Meta keys.
+2. Create your login.
+   **bash, on the server:**
+   ```bash
+   docker compose exec engine python -m app.cli create-admin you@example.com
+   ```
+   You should see: one line starting with `https://<your-domain>/invite/`.
+3. Open that link on your laptop and choose a password (at least 10 characters). Then log in at `https://<your-domain>/login`.
+4. Two-step login: install **Google Authenticator** (or Microsoft Authenticator) on your phone, choose **Enter a setup key**, type the key the page shows, then type the 6-digit code from the app. From now on you type a fresh code after your password each time.
+   - Lost your phone? On the server run `docker compose exec engine python -m app.cli admin-link you@example.com`. It prints a new link that resets your password and your two-step login.
+
+### Add a business
+
+1. Ask the business to share its Google Sheet with the service-account email (Part A) as **Editor**.
+2. In the dashboard: **Businesses → Add a business**. Fill in the names, the time zone, the Sheet id and the instructions, and the web id (for example `sweetbakes`; leave it empty to get one made from the business name). Press **Check Sheet access**.
+   You should see: "The Sheet is readable" and each tab with its columns. Then press **Create business**.
+3. **Sheet** tab: tick which tabs the bot uses and what customers may do on each one (Part B explains read, own rows and add rows). Press **What a customer would see** to check before you save.
+4. **Staff & groups** tab: add staff numbers with the country code (for example `+92 300 1111111`). Once a group number is linked, tick the staff groups and the group that gets alerts.
+5. **Official number** tab: paste the business's Meta **phone number ID**, **access token** and **app secret** (Part C) and press **Save keys**, then **Test connection**.
+   You should see: the number and the business's verified name. Copy the **Callback URL** and **Verify token** from this page into the business's Meta app webhook settings (Part F) and subscribe to `messages`.
+6. **Numbers** (top menu) → **Add a number**: type a session name (for example `sweetbakes-1`) and notes (carrier, SIM cost, renewal date), press **Add and show the QR code**, and scan it with the purchased phone (WhatsApp → Settings → Linked devices → Link a device).
+   You should see: the status change to `WORKING`. Then open the business's **Group number** tab, pick this number and save.
+7. **Logins** tab: type the owner's email and press **Create login**. Send them the one-time link it shows (it works for 7 days). They set their own password and log in at `https://<your-domain>/login`.
+
+### Pause a business
+
+A business that stops paying: open it and press **Pause business**. The bot ignores all its messages (so there are no Meta charges); nothing is deleted. **Resume business** turns it back on.
+
+### Dashboard click-through test
+
+1. Log in as admin. The Businesses page lists your businesses, and the group number shows `WORKING`.
+2. Add a test business. Its home page opens with "Business created."
+3. Change its bot name on **Bot settings**, then message its official number: the reply uses the new name (no restart needed).
+4. Invite a business login, open the link in a private browser window, set a password and log in: you see only that business.
+5. As that business login, open `https://<your-domain>/admin`: you get "Not allowed".
+6. **Numbers → Add a number** shows a QR code; after scanning, the status becomes `WORKING` and the phone number appears.
+7. Pause the test business: a message to its number gets no reply. Resume it.
+
+### Upgrading from clients.yaml
+
+If you ran the engine before the dashboard existed: add `SECRET_KEY` to `.env`, then run `git pull` and `docker compose up -d --build`. On that first start the engine copies `clients.yaml` and the Meta keys from `.env` into the dashboard database, once. After that, change settings only in the dashboard (`clients.yaml` is ignored). The first business keeps working on the old webhook address `https://<your-domain>/webhooks/meta`; switch it to its own address (on its Official number tab) whenever convenient.
+
+## 14. Day-to-Day Tasks
 
 - **Change a price or an answer:** just edit the cell in the Sheet directly. Price/answer values themselves
   show up on the very next question; the Knowledge tab's text and any tab's column names can take up to 5
   minutes to refresh (they're cached briefly to avoid hammering Google's API).
-- **Add a staff member or group:** edit `staff_numbers` / `staff_chats` in `clients.yaml`, re-upload it with
-  `scp` (as in Part E), then `docker compose restart engine` on the server.
-- **Add a new tab:** create the tab and its header row in the Sheet, add an entry for it under `tabs:` in
-  `clients.yaml`, re-upload, and restart the engine.
+- **Add a staff member or group:** in the dashboard, open the business → **Staff & groups**, add the number or
+  tick the group, and press **Save**. The bot uses it from the next message.
+- **Add a new tab:** create the tab and its header row in the Sheet, then in the dashboard open the business →
+  **Sheet**, tick "the bot uses this tab", choose what customers may do, and press **Save permissions**.
+- **Add a new business:** follow Part K, "Add a business".
 - **Update to a new version of the code:** on the server, during quiet hours (a restart drops any message
   that was received but not yet answered — there's no queue):
   ```bash
@@ -641,10 +690,10 @@ playing 15 scripted test conversations against each one.
 - **View logs:** `docker compose logs -f engine` (or `waha`, or `caddy`).
 - **Restart:** `docker compose restart engine` (just the engine) or `docker compose restart` (everything).
 
-## 14. Troubleshooting
+## 15. Troubleshooting
 
-- **`/health` returns 503.** Either the WAHA session isn't `WORKING` (open the dashboard through the SSH
-  tunnel and relink it — Part G) or the database isn't writable (check the server isn't out of disk space).
+- **`/health` returns 503.** Either the WAHA session isn't `WORKING` (relink it: in the dashboard, **Numbers** → the
+  number → **Relink**; or through the SSH tunnel as in Part G) or the database isn't writable (check the server isn't out of disk space).
 - **No reply on the official number.** Check, in order: the webhook shows verified in Meta (Part F); the
   logs (`docker compose logs engine`) for `403` responses on `/webhooks/meta` (means `META_APP_SECRET`
   doesn't match); an expired or revoked `META_ACCESS_TOKEN`; a missing payment method (Part C); and Meta's
@@ -654,7 +703,7 @@ playing 15 scripted test conversations against each one.
   never gets a reply. Also check you haven't hit the loop-breaker limit of 6 bot replies per chat per 10
   minutes.
 - **"The sheet couldn't be reached right now."** Usually the Sheet isn't shared with the service account
-  email (Part A), or a tab was renamed in the Sheet without updating `clients.yaml`.
+  email (Part A), or a tab was renamed in the Sheet without updating the business's **Sheet** page in the dashboard.
 - **Totals report rows as "unreadable".** Either a date in that tab doesn't match `date_format`, or an
   amount cell has non-numeric text in it that the engine can't parse as a number.
 - **Voice notes aren't understood.** Confirm there's a real, working OpenAI key in `STT_API_KEY` (or
@@ -666,7 +715,7 @@ playing 15 scripted test conversations against each one.
 - **`git push` says "Invalid username or token".** GitHub no longer accepts a plain password over `git push`.
   Run `gh auth login`, or create a personal access token and use it in place of your password.
 
-## 15. Glossary
+## 16. Glossary
 
 - **VPS (virtual private server):** a small rented computer, always on, reachable over the internet — this is
   where the engine, WAHA and Caddy run.
@@ -691,8 +740,10 @@ playing 15 scripted test conversations against each one.
   the phone number itself, is what's used in API calls and goes in `meta_phone_number_id`.
 - **WAHA:** the open-source tool this project uses to connect a second WhatsApp number the way WhatsApp Web
   does, so it can be present in existing groups (which Meta's official API can't join).
-- **Session (WAHA):** one connected WhatsApp login inside WAHA, identified by a name you choose — matched to a
-  client in `clients.yaml` via `waha_session`.
+- **Session (WAHA):** one connected WhatsApp login inside WAHA, identified by a name you choose. The
+  dashboard's **Numbers** page lists them; each business gets one on its **Group number** page.
+- **Dashboard:** the engine's own website at `https://<your-domain>/`, where you manage businesses, numbers
+  and logins (Part K). Not the same as WAHA's dashboard, which only opens through the SSH tunnel.
 - **QR linking:** connecting a phone number to WAHA by scanning a QR code with WhatsApp's own
   Linked Devices feature — the same mechanism as linking WhatsApp Web.
 - **Group id (`…@g.us`):** WAHA's identifier for one WhatsApp group chat.
