@@ -6,8 +6,11 @@ import json
 
 from app.bot import Bot
 from app.config import Client, TabRule
+from app.db import Db
 from app.llm import ModelReply, ToolCall
+from app.registry import Registry
 from app.store import Store
+from app.vault import Vault
 from app.whatsapp import Incoming
 
 
@@ -181,3 +184,35 @@ def make_bot(*replies: ModelReply, clock=lambda: 1_790_000_000.0, **llm_options)
 
 def texts(sender) -> list[str]:
     return [text for _, text, _ in sender.sent]
+
+
+def acme_config() -> dict:
+    """make_client()'s settings as the dashboard stores them."""
+    return {
+        "business": "Sweet Bakes", "bot_name": "Sara", "sheet_id": "sheet-1", "timezone": "Asia/Karachi",
+        "instructions": "Orders need 24 hours notice.", "date_format": "%d/%m/%Y",
+        "knowledge_tab": "Knowledge", "handoff_tab": "Handoffs",
+        "tabs": {
+            "Prices": {"customer": ["read"]},
+            "Orders": {"customer": ["own", "append"], "owner_column": "Phone",
+                       "fill": {"Name": "name", "Phone": "phone"}},
+            "Staff Notes": {},
+            "Expenses": {},
+        },
+        "staff_chats": ["staff@g.us"], "staff_numbers": ["923001111111"], "staff_alert_chat": "staff@g.us",
+    }
+
+
+def memory_registry(secret: str = "test-secret") -> Registry:
+    return Registry(Db(":memory:"), Vault(secret))
+
+
+def registry_with_acme(meta: bool = True) -> Registry:
+    """A registry holding the acme bakery, its own Meta keys and its group number 'acme'."""
+    registry = memory_registry()
+    registry.create_business("acme", acme_config(), actor="test")
+    if meta:
+        registry.save_meta("acme", "106540352242922", "acme-token", "acme-secret", actor="test")
+    registry.add_number("acme", "", actor="test")
+    registry.assign_number("acme", "acme", actor="test")
+    return registry

@@ -1,0 +1,289 @@
+"""Businesses, the purchased-number inventory and the audit log: the dashboard's source of truth."""
+from __future__ import annotations
+
+import json
+import logging
+import re
+import secrets
+import sqlite3
+import time
+from dataclasses import dataclass, replace
+from pathlib import Path
+
+import yaml
+
+from app.config import Client, Settings, client_from_dict, digits
+from app.db import Db
+from app.vault import Vault, VaultError
+
+log = logging.getLogger("registry")
+
+SCHEMA = """
+CREATE TABLE IF NOT EXISTS businesses (
+  id TEXT PRIMARY KEY,
+  config TEXT NOT NULL,
+  meta_phone_number_id TEXT UNIQUE,
+  meta_access_token TEXT,
+  meta_app_secret TEXT,
+  meta_verify_token TEXT NOT NULL,
+  active INTEGER NOT NULL DEFAULT 1,
+  created_at REAL NOT NULL,
+  updated_at REAL NOT NULL
+);
+CREATE TABLE IF NOT EXISTS numbers (
+  session TEXT PRIMARY KEY,
+  business_id TEXT UNIQUE REFERENCES businesses(id),
+  phone TEXT NOT NULL DEFAULT '',
+  notes TEXT NOT NULL DEFAULT '',
+  created_at REAL NOT NULL
+);
+CREATE TABLE IF NOT EXISTS audit (
+  id INTEGER PRIMARY KEY,
+  at REAL NOT NULL,
+  actor TEXT NOT NULL,
+  business_id TEXT,
+  action TEXT NOT NULL,
+  detail TEXT NOT NULL DEFAULT ''
+);
+CREATE INDEX IF NOT EXISTS audit_by_business ON audit (business_id, at);
+"""
+SLUG = re.compile(r"[a-z0-9][a-z0-9-]{1,30}[a-z0-9]")
+CONFIG_KEYS = frozenset({"business", "bot_name", "sheet_id", "timezone", "date_format", "instructions",
+                         "knowledge_tab", "handoff_tab", "staff_chats", "staff_numbers", "staff_alert_chat",
+                         "retention_days", "tabs"})
+SELECT_BUSINESS = "SELECT b.*, n.session FROM businesses b LEFT JOIN numbers n ON n.business_id = b.id"
+
+
+@dataclass(frozen=True)
+class Business:
+    """One business as the pages see it: its settings, and which secrets are saved (never the secrets)."""
+    id: str
+    config: dict
+    meta_phone_number_id: str | None
+    has_meta_token: bool
+    has_meta_secret: bool
+    meta_token_hint: str  # last 4 characters of the access token, or ""
+    meta_verify_token: str
+    active: bool
+    number: str | None  # the assigned WAHA session
+    keys_unreadable: bool  # sealed Meta keys can't be opened: SECRET_KEY changed
+
+
+@dataclass(frozen=True)
+class Number:
+    session: str
+    business_id: str | None
+    phone: str
+    notes: str
+
+
+class Registry:
+    def __init__(self, db: Db, vault: Vault, clock=time.time) -> None:
+        self.db, self.vault, self.clock = db, vault, clock
+        db.script(SCHEMA)
+
+    # --- audit
+
+    def audit(self, actor: str, business_id: str | None, action: str, detail: dict) -> None:
+        self.db.write("INSERT INTO audit (at, actor, business_id, action, detail) VALUES (?, ?, ?, ?, ?)",
+                      (self.clock(), actor, business_id, action,
+                       json.dumps(detail, ensure_ascii=False, sort_keys=True)))
+
+    def audit_log(self, business_id: str | None = None, limit: int = 100) -> list[sqlite3.Row]:
+        if business_id is None:
+            return self.db.all("SELECT * FROM audit ORDER BY at DESC, id DESC LIMIT ?", (limit,))
+        return self.db.all("SELECT * FROM audit WHERE business_id = ? ORDER BY at DESC, id DESC LIMIT ?",
+                           (business_id, limit))
+
+    # --- businesses
+
+    def is_empty(self) -> bool:
+        return self.db.one("SELECT 1 FROM businesses LIMIT 1") is None
+
+    def _open(self, sealed: str | None) -> str | None:
+        """The secret; "" when none is saved; None when it can't be opened."""
+        if not sealed:
+            return ""
+        try:
+            return self.vault.open(sealed)
+        except VaultError:
+            return None
+
+    def _business(self, row: sqlite3.Row) -> Business:
+        token, secret = self._open(row["meta_access_token"]), self._open(row["meta_app_secret"])
+        return Business(id=row["id"], config=json.loads(row["config"]),
+                        meta_phone_number_id=row["meta_phone_number_id"], has_meta_token=bool(token),
+                        has_meta_secret=bool(secret), meta_token_hint=(token or "")[-4:],
+                        meta_verify_token=row["meta_verify_token"], active=bool(row["active"]),
+                        number=row["session"], keys_unreadable=token is None or secret is None)
+
+    def businesses(self) -> list[Business]:
+        return [self._business(r) for r in self.db.all(SELECT_BUSINESS + " ORDER BY b.id")]
+
+    def business(self, business_id: str | None) -> Business | None:
+        row = self.db.one(SELECT_BUSINESS + " WHERE b.id = ?", (business_id,))
+        return self._business(row) if row else None
+
+    def clients(self) -> dict[str, Client]:
+        """Every active business as the engine's Client, with its Meta keys opened."""
+        out = {}
+        for row in self.db.all(SELECT_BUSINESS + " WHERE b.active = 1"):
+            raw = {**json.loads(row["config"]), "meta_phone_number_id": row["meta_phone_number_id"],
+                   "waha_session": row["session"]}
+            try:
+                client = client_from_dict(row["id"], raw)
+            except ValueError:
+                log.exception("business_config_invalid business=%s", row["id"])
+                continue
+            out[client.id] = replace(client, meta_access_token=self._open(row["meta_access_token"]) or "",
+                                     meta_app_secret=self._open(row["meta_app_secret"]) or "",
+                                     meta_verify_token=row["meta_verify_token"])
+        return out
+
+    def _clean(self, business_id: str, config: dict) -> dict:
+        """Known settings only, staff numbers as digits, validated exactly like clients.yaml."""
+        unknown = set(config) - CONFIG_KEYS
+        if unknown:
+            raise ValueError(f"Unknown settings: {', '.join(sorted(unknown))}")
+        config = {**config, "staff_numbers": [digits(str(n)) for n in config.get("staff_numbers") or []]}
+        client_from_dict(business_id, config)
+        return config
+
+    def create_business(self, business_id: str, config: dict, actor: str, action: str = "business.create") -> None:
+        if not SLUG.fullmatch(business_id or ""):
+            raise ValueError("The web id must be 3-32 lowercase letters, digits or dashes, like sweetbakes.")
+        config = self._clean(business_id, config)
+        now = self.clock()
+        try:
+            self.db.write("INSERT INTO businesses (id, config, meta_verify_token, created_at, updated_at)"
+                          " VALUES (?, ?, ?, ?, ?)",
+                          (business_id, json.dumps(config, ensure_ascii=False), secrets.token_urlsafe(24), now, now))
+        except sqlite3.IntegrityError:
+            raise ValueError(f"A business with the web id {business_id!r} already exists.") from None
+        self.audit(actor, business_id, action, {"business": config["business"]})
+
+    def save_config(self, business_id: str, changes: dict, actor: str) -> None:
+        business = self.business(business_id)
+        if business is None:
+            raise ValueError("No such business.")
+        config = self._clean(business_id, {**business.config, **changes})
+        self.db.write("UPDATE businesses SET config = ?, updated_at = ? WHERE id = ?",
+                      (json.dumps(config, ensure_ascii=False), self.clock(), business_id))
+        changed = {key: config[key] for key in changes if business.config.get(key) != config.get(key)}
+        if changed:
+            self.audit(actor, business_id, "settings.save", changed)
+
+    def save_meta(self, business_id: str, phone_number_id: str, access_token: str, app_secret: str,
+                  actor: str) -> None:
+        """The official number's keys; an empty token or secret keeps the saved one."""
+        phone_number_id = (phone_number_id or "").strip()
+        if phone_number_id and not phone_number_id.isdigit():
+            raise ValueError("The phone number ID is digits only (Meta shows it next to the number).")
+        sets, args = ["meta_phone_number_id = ?"], [phone_number_id or None]
+        detail = {"meta_phone_number_id": phone_number_id}
+        if access_token:
+            sets.append("meta_access_token = ?")
+            args.append(self.vault.seal(access_token))
+            detail["access_token"] = "(changed)"
+        if app_secret:
+            sets.append("meta_app_secret = ?")
+            args.append(self.vault.seal(app_secret))
+            detail["app_secret"] = "(changed)"
+        try:
+            found = self.db.write(f"UPDATE businesses SET {', '.join(sets)}, updated_at = ? WHERE id = ?",
+                                  (*args, self.clock(), business_id))
+        except sqlite3.IntegrityError:
+            raise ValueError("Another business already uses that phone number ID.") from None
+        if not found:
+            raise ValueError("No such business.")
+        self.audit(actor, business_id, "meta.save", detail)
+
+    def set_active(self, business_id: str, active: bool, actor: str) -> None:
+        if not self.db.write("UPDATE businesses SET active = ?, updated_at = ? WHERE id = ?",
+                             (int(active), self.clock(), business_id)):
+            raise ValueError("No such business.")
+        self.audit(actor, business_id, "business.resume" if active else "business.pause", {})
+
+    # --- numbers
+
+    @staticmethod
+    def _number(row: sqlite3.Row) -> Number:
+        return Number(session=row["session"], business_id=row["business_id"], phone=row["phone"],
+                      notes=row["notes"])
+
+    def numbers(self) -> list[Number]:
+        return [self._number(r) for r in self.db.all("SELECT * FROM numbers ORDER BY session")]
+
+    def number(self, session: str) -> Number | None:
+        row = self.db.one("SELECT * FROM numbers WHERE session = ?", (session,))
+        return self._number(row) if row else None
+
+    def add_number(self, session: str, notes: str, actor: str) -> None:
+        if not SLUG.fullmatch(session or ""):
+            raise ValueError("The session name must be 3-32 lowercase letters, digits or dashes, like sweetbakes-1.")
+        try:
+            self.db.write("INSERT INTO numbers (session, notes, created_at) VALUES (?, ?, ?)",
+                          (session, notes.strip(), self.clock()))
+        except sqlite3.IntegrityError:
+            raise ValueError(f"A number called {session!r} already exists.") from None
+        self.audit(actor, None, "number.add", {"session": session})
+
+    def save_number_notes(self, session: str, notes: str, actor: str) -> None:
+        if not self.db.write("UPDATE numbers SET notes = ? WHERE session = ?", (notes.strip(), session)):
+            raise ValueError("No such number.")
+        self.audit(actor, None, "number.notes", {"session": session})
+
+    def set_number_phone(self, session: str, phone: str) -> None:
+        self.db.write("UPDATE numbers SET phone = ? WHERE session = ?", (digits(phone), session))
+
+    def assign_number(self, session: str, business_id: str | None, actor: str) -> None:
+        """Give a number to a business (taking the business off any other number), or unassign it with None."""
+        number = self.number(session)
+        if number is None:
+            raise ValueError("No such number.")
+        if business_id is not None and self.business(business_id) is None:
+            raise ValueError("No such business.")
+        with self.db.transaction():
+            if business_id is not None:
+                self.db.write("UPDATE numbers SET business_id = NULL WHERE business_id = ?", (business_id,))
+            self.db.write("UPDATE numbers SET business_id = ? WHERE session = ?", (business_id, session))
+        self.audit(actor, business_id or number.business_id,
+                   "number.assign" if business_id else "number.unassign", {"session": session})
+
+    def delete_number(self, session: str, actor: str) -> None:
+        number = self.number(session)
+        if number is None:
+            raise ValueError("No such number.")
+        if number.business_id:
+            raise ValueError("Unassign the number from its business before deleting it.")
+        self.db.write("DELETE FROM numbers WHERE session = ?", (session,))
+        self.audit(actor, None, "number.delete", {"session": session})
+
+    # --- first run
+
+    def import_yaml(self, path: str, settings: Settings) -> int:
+        """First start only: copy clients.yaml, and the pilot's .env Meta keys, into the database."""
+        entries = {str(k): dict(v or {}) for k, v in
+                   ((yaml.safe_load(Path(path).read_text(encoding="utf-8")) or {}).get("clients") or {}).items()}
+        for business_id, entry in entries.items():  # check everything before writing anything
+            if not SLUG.fullmatch(business_id):
+                raise ValueError(f"Rename {business_id!r} in clients.yaml: web ids are 3-32 lowercase letters, "
+                                 "digits or dashes.")
+            unknown = set(entry) - CONFIG_KEYS - {"meta_phone_number_id", "waha_session"}
+            if unknown:
+                raise ValueError(f"{business_id}: unknown settings {', '.join(sorted(unknown))}")
+            client_from_dict(business_id, entry)
+        for business_id, entry in entries.items():
+            phone_number_id = str(entry.pop("meta_phone_number_id", "") or "")
+            session = entry.pop("waha_session", None)
+            self.create_business(business_id, entry, actor="system", action="business.import")
+            if phone_number_id:
+                self.save_meta(business_id, phone_number_id, settings.meta_access_token, settings.meta_app_secret,
+                               actor="system")
+                if settings.meta_verify_token:  # the webhook already configured at Meta keeps verifying
+                    self.db.write("UPDATE businesses SET meta_verify_token = ? WHERE id = ?",
+                                  (settings.meta_verify_token, business_id))
+            if session:
+                self.add_number(str(session), "imported from clients.yaml", actor="system")
+                self.assign_number(str(session), business_id, actor="system")
+        return len(entries)
