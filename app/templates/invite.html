@@ -1,0 +1,14 @@
+{% extends "base.html" %}
+{% block content %}
+<article>
+  <h1>Set your password</h1>
+  <p>Login: <strong>{{ email }}</strong></p>
+  <form method="post">
+    <label>Password (at least 10 characters)
+      <input type="password" name="password" required minlength="10" autocomplete="new-password"></label>
+    <label>Password again
+      <input type="password" name="confirm" required minlength="10" autocomplete="new-password"></label>
+    <button type="submit">Save password</button>
+  </form>
+</article>
+{% endblock %}

@@ -1,0 +1,39 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  {% if refresh %}<meta http-equiv="refresh" content="{{ refresh }}">{% endif %}
+  <title>{{ title }} · WhatsApp Assistant</title>
+  <link rel="stylesheet" href="/static/pico.min.css">
+  <link rel="stylesheet" href="/static/app.css">
+</head>
+<body>
+<header class="container">
+  <nav>
+    <ul><li><strong>WhatsApp Assistant</strong></li></ul>
+    {% if user %}
+    <ul>
+      {% if user.role == "admin" %}
+      <li><a href="/admin">Businesses</a></li>
+      <li><a href="/admin/numbers">Numbers</a></li>
+      <li><a href="/admin/admins">Admins</a></li>
+      {% endif %}
+      <li>
+        <form method="post" action="/logout" class="inline">
+          <input type="hidden" name="csrf" value="{{ csrf }}">
+          <button type="submit" class="secondary outline">Log out</button>
+        </form>
+      </li>
+    </ul>
+    {% endif %}
+  </nav>
+</header>
+<main class="container">
+  {% if business_nav %}{% include "_business_nav.html" %}{% endif %}
+  {% if ok %}<p class="notice ok">{{ ok }}</p>{% endif %}
+  {% if error %}<p class="notice error">{{ error }}</p>{% endif %}
+  {% block content %}{% endblock %}
+</main>
+</body>
+</html>

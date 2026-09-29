@@ -10,9 +10,12 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 
 import httpx
-from fastapi import BackgroundTasks, FastAPI, Request, Response
+from fastapi import BackgroundTasks, FastAPI, HTTPException, Request, Response
 from fastapi.responses import JSONResponse, PlainTextResponse
+from fastapi.staticfiles import StaticFiles
 
+from app import web
+from app.auth import Auth
 from app.bot import Bot
 from app.config import Client, Settings
 from app.db import Db
@@ -70,13 +73,14 @@ def maintain(bot: Bot, backup_dir: str, now: float, clients: dict[str, Client] |
         old.unlink()
 
 
-def create_app(settings: Settings | None = None, bot: Bot | None = None,
-               registry: Registry | None = None) -> FastAPI:
+def create_app(settings: Settings | None = None, bot: Bot | None = None, registry: Registry | None = None,
+               auth: Auth | None = None) -> FastAPI:
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s %(message)s")
     settings = settings or Settings.from_env()
     if not settings.secret_key:
         raise RuntimeError("Set SECRET_KEY in .env (make one with: openssl rand -hex 32), then restart.")
     registry = registry or open_registry(settings)
+    auth = auth or Auth(registry.db, registry.vault)
     bot = bot or build_bot(settings, registry.clients())
 
     def reload() -> None:
@@ -118,6 +122,11 @@ def create_app(settings: Settings | None = None, bot: Bot | None = None,
 
     app = FastAPI(lifespan=lifespan, docs_url=None, redoc_url=None, openapi_url=None)
     app.state.settings, app.state.registry, app.state.bot, app.state.reload = settings, registry, bot, reload
+    app.state.auth = auth
+    app.middleware("http")(web.security_headers)
+    app.add_exception_handler(HTTPException, web.http_error)
+    app.mount("/static", StaticFiles(directory=web.STATIC), name="static")
+    app.include_router(web.router)
 
     @app.get("/webhooks/meta")
     def meta_verify(request: Request) -> Response:

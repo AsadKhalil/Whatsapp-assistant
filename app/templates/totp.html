@@ -1,0 +1,19 @@
+{% extends "base.html" %}
+{% block content %}
+<article>
+  <h1>Two-step login</h1>
+  {% if secret %}
+  <p>Admins need a 6-digit code from an authenticator app (Google Authenticator, Microsoft Authenticator, ...).
+     Open the app, choose <em>Enter a setup key</em>, and type this key:</p>
+  <p><code id="totp-secret">{{ secret }}</code></p>
+  <p><small>Or open this link on the phone that has the app: <a href="{{ uri }}">{{ uri }}</a></small></p>
+  {% else %}
+  <p>Enter the 6-digit code from your authenticator app.</p>
+  {% endif %}
+  <form method="post" action="/login/totp">
+    <input type="hidden" name="csrf" value="{{ csrf }}">
+    <label>6-digit code <input name="code" inputmode="numeric" autocomplete="one-time-code" required autofocus></label>
+    <button type="submit">Continue</button>
+  </form>
+</article>
+{% endblock %}

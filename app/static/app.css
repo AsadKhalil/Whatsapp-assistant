@@ -1,0 +1,11 @@
+/* A few additions to Pico.css */
+.notice { padding: 0.75rem 1rem; border-radius: 0.5rem; }
+.notice.ok { background: #e7f6ec; color: #1b5e20; }
+.notice.error { background: #fdecea; color: #b71c1c; }
+form.inline { display: inline; margin: 0; }
+form.inline button { width: auto; margin: 0 0.25rem 0 0; padding: 0.25rem 0.75rem; }
+.badge { padding: 0.1rem 0.5rem; border-radius: 1rem; font-size: 0.85em; background: #eceff1; color: #263238; }
+.badge.good { background: #e7f6ec; color: #1b5e20; }
+.badge.bad { background: #fdecea; color: #b71c1c; }
+img.qr { max-width: 280px; background: #fff; padding: 0.5rem; }
+nav.tabs { flex-wrap: wrap; }
