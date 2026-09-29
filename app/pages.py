@@ -149,7 +149,8 @@ def staff_page(request: Request, scope: Scope, form: Form | None) -> Response:
         lines = [line.strip() for line in numbers_text.splitlines() if line.strip()]
         bad = [line for line in lines if not line.startswith("+") or not 10 <= len(digits(line)) <= 15]
         changes: dict = {"staff_numbers": [digits(line) for line in lines]}
-        if form.has("groups_listed"):  # only when this page showed the groups: WAHA being down keeps the saved ones
+        # only when this request could itself read the groups: WAHA down (now, or already at page load) keeps the saved ones
+        if form.has("groups_listed") and not groups_error:
             ids = {group["id"] for group in groups}
             changes["staff_chats"] = [chat for chat in form.all("staff_chats") if chat in ids]
             changes["staff_alert_chat"] = form.get("alert") if form.get("alert") in ids else None

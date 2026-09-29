@@ -44,6 +44,18 @@ def test_staff_page_keeps_saved_groups_when_waha_is_down():
     assert site.bot.clients["acme"].staff_chats == {"staff@g.us"}
 
 
+def test_saved_groups_survive_waha_failing_after_the_page_loaded():
+    site = Site()
+    site.bot.waha.group_list["acme"] = [{"id": "staff@g.us", "name": "Staff"}, {"id": "other@g.us", "name": "Other"}]
+    http = site.business_user()
+    token = csrf(http, "/app/staff")  # the page loaded while WAHA worked, so the form lists the groups
+    site.bot.waha.manage_fail = SendError("waha unreachable: ConnectError")
+    http.post("/app/staff", data={"csrf": token, "staff_numbers": "+92 300 1111111", "groups_listed": "1",
+                                  "staff_chats": "other@g.us", "alert": "other@g.us"})
+    client = site.bot.clients["acme"]
+    assert client.staff_chats == {"staff@g.us"} and client.staff_alert_chat == "staff@g.us"
+
+
 def test_staff_page_asks_to_link_a_group_number_first():
     registry = registry_with_acme()
     registry.assign_number("acme", None, actor="t")
