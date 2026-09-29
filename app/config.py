@@ -34,6 +34,9 @@ class Settings:
     stt_api_key: str = ""  # empty = reuse llm_api_key
     stt_model: str = "gpt-transcribe"
     google_service_account_file: str = "secrets/google-service-account.json"
+    secret_key: str = ""  # required by the dashboard: encrypts Meta keys and TOTP secrets in the database
+    public_url: str = ""  # e.g. https://bot.example.com; compose sets it from DOMAIN
+    waha_webhook_url: str = "http://engine:8000/webhooks/waha"  # where WAHA sessions created by the dashboard post
 
     @classmethod
     def from_env(cls, **overrides: str) -> "Settings":
@@ -77,6 +80,9 @@ class Client:
     staff_alert_chat: str | None = None
     retention_days: int = 90
     date_format: str | None = None  # strptime pattern for dates typed into the Sheet by hand
+    meta_access_token: str = field(default="", repr=False)  # this business's own Meta keys (from the dashboard)
+    meta_app_secret: str = field(default="", repr=False)
+    meta_verify_token: str = field(default="", repr=False)
 
 
 def _tab_rule(client_id: str, tab: str, raw: dict) -> TabRule:
@@ -91,31 +97,42 @@ def _tab_rule(client_id: str, tab: str, raw: dict) -> TabRule:
     return TabRule(customer=customer, owner_column=raw.get("owner_column"), fill=fill)
 
 
+def client_from_dict(client_id: str, c: dict) -> Client:
+    """One client from a clients.yaml entry or a stored business config; raises ValueError saying what's wrong."""
+    for key in ("business", "bot_name", "sheet_id"):
+        if not str(c.get(key) or "").strip():
+            raise ValueError(f"{client_id}: {key} is required")
+    timezone = c.get("timezone") or "UTC"
+    try:
+        ZoneInfo(timezone)
+    except (ZoneInfoNotFoundError, ValueError):
+        raise ValueError(f"{client_id}: unknown timezone {timezone!r}") from None
+    try:
+        retention_days = int(c.get("retention_days") or 90)
+    except (TypeError, ValueError):
+        raise ValueError(f"{client_id}: retention_days must be a whole number of days") from None
+    if not 1 <= retention_days <= 3650:
+        raise ValueError(f"{client_id}: retention_days must be between 1 and 3650")
+    return Client(
+        id=client_id,
+        business=str(c["business"]),
+        bot_name=str(c["bot_name"]),
+        sheet_id=str(c["sheet_id"]),
+        tabs={tab: _tab_rule(client_id, tab, rule or {}) for tab, rule in (c.get("tabs") or {}).items()},
+        timezone=timezone,
+        instructions=c.get("instructions") or "",
+        knowledge_tab=c.get("knowledge_tab") or "Knowledge",
+        handoff_tab=c.get("handoff_tab") or "Handoffs",
+        meta_phone_number_id=str(c["meta_phone_number_id"]) if c.get("meta_phone_number_id") else None,
+        waha_session=c.get("waha_session") or None,
+        staff_chats=frozenset(c.get("staff_chats") or []),
+        staff_numbers=frozenset(digits(str(n)) for n in c.get("staff_numbers") or []),
+        staff_alert_chat=c.get("staff_alert_chat") or None,
+        retention_days=retention_days,
+        date_format=c.get("date_format") or None,
+    )
+
+
 def load_clients(path: str) -> dict[str, Client]:
     raw = yaml.safe_load(Path(path).read_text(encoding="utf-8")) or {}
-    clients = {}
-    for cid, c in (raw.get("clients") or {}).items():
-        timezone = c.get("timezone", "UTC")
-        try:
-            ZoneInfo(timezone)
-        except (ZoneInfoNotFoundError, ValueError):
-            raise ValueError(f"{cid}: unknown timezone {timezone!r}") from None
-        clients[cid] = Client(
-            id=cid,
-            business=c["business"],
-            bot_name=c["bot_name"],
-            sheet_id=c["sheet_id"],
-            tabs={tab: _tab_rule(cid, tab, rule or {}) for tab, rule in (c.get("tabs") or {}).items()},
-            timezone=timezone,
-            instructions=c.get("instructions", ""),
-            knowledge_tab=c.get("knowledge_tab", "Knowledge"),
-            handoff_tab=c.get("handoff_tab", "Handoffs"),
-            meta_phone_number_id=str(c["meta_phone_number_id"]) if c.get("meta_phone_number_id") else None,
-            waha_session=c.get("waha_session"),
-            staff_chats=frozenset(c.get("staff_chats") or []),
-            staff_numbers=frozenset(digits(str(n)) for n in c.get("staff_numbers") or []),
-            staff_alert_chat=c.get("staff_alert_chat"),
-            retention_days=int(c.get("retention_days", 90)),
-            date_format=c.get("date_format"),
-        )
-    return clients
+    return {cid: client_from_dict(cid, c or {}) for cid, c in (raw.get("clients") or {}).items()}

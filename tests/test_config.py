@@ -1,6 +1,10 @@
-import pytest
+from dataclasses import replace
+from pathlib import Path
 
-from app.config import Settings, load_clients, same_phone
+import pytest
+import yaml
+
+from app.config import Settings, client_from_dict, load_clients, same_phone
 from tests.fakes import make_client
 
 
@@ -54,3 +58,29 @@ def test_phone_matching_ignores_format_and_country_prefix():
 
 def test_fake_client_matches_the_real_shape():
     assert make_client(bot_name="Zara").bot_name == "Zara"
+
+
+def test_client_from_dict_matches_the_yaml_loader_and_hides_secrets():
+    raw = yaml.safe_load(Path("clients.example.yaml").read_text(encoding="utf-8"))["clients"]["sweetbakes"]
+    assert client_from_dict("sweetbakes", raw) == load_clients("clients.example.yaml")["sweetbakes"]
+    secret = replace(make_client(), meta_access_token="EAAG-token", meta_app_secret="app-secret",
+                     meta_verify_token="verify")
+    assert "EAAG-token" not in repr(secret) and "app-secret" not in repr(secret) and "verify" not in repr(secret)
+
+
+@pytest.mark.parametrize("change, message", [
+    ({"business": ""}, "business is required"),
+    ({"bot_name": None}, "bot_name is required"),
+    ({"retention_days": 5000}, "between 1 and 3650"),
+    ({"retention_days": "abc"}, "whole number"),
+])
+def test_client_from_dict_explains_what_is_wrong(change, message):
+    raw = {"business": "B", "bot_name": "S", "sheet_id": "s", **change}
+    with pytest.raises(ValueError, match=message):
+        client_from_dict("x", raw)
+
+
+def test_new_settings_have_safe_defaults():
+    s = Settings()
+    assert s.secret_key == "" and s.public_url == ""
+    assert s.waha_webhook_url == "http://engine:8000/webhooks/waha"
