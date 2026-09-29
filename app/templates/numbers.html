@@ -1,0 +1,30 @@
+{% extends "base.html" %}
+{% block content %}
+<h1>Purchased numbers</h1>
+<p>Each number is a SIM in a spare phone, linked like WhatsApp Web. Keep every phone online at least once every 14 days.</p>
+<table>
+  <thead><tr><th>Session</th><th>Phone</th><th>Status</th><th>Business</th><th>Notes</th></tr></thead>
+  <tbody>
+  {% for r in rows %}
+  <tr>
+    <td><a href="/admin/numbers/{{ r.n.session }}">{{ r.n.session }}</a></td>
+    <td>{% if r.n.phone %}+{{ r.n.phone }}{% endif %}</td>
+    <td><span class="badge {{ 'good' if r.status == 'WORKING' else 'bad' }}">{{ r.status }}</span></td>
+    <td>{{ names.get(r.n.business_id, "—") }}</td>
+    <td>{{ r.n.notes }}</td>
+  </tr>
+  {% else %}
+  <tr><td colspan="5">No numbers yet.</td></tr>
+  {% endfor %}
+  </tbody>
+</table>
+<h2>Add a number</h2>
+<form method="post" action="/admin/numbers">
+  <input type="hidden" name="csrf" value="{{ csrf }}">
+  <div class="grid">
+    <input name="session" placeholder="Session name, e.g. sweetbakes-1" aria-label="Session name" value="{{ session }}" required>
+    <input name="notes" placeholder="Notes: carrier, SIM cost, renewal date" aria-label="Notes" value="{{ notes }}">
+    <button type="submit">Add and show the QR code</button>
+  </div>
+</form>
+{% endblock %}

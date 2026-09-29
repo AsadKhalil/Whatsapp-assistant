@@ -1,0 +1,42 @@
+{% extends "base.html" %}
+{% block content %}
+<p><a href="/admin/numbers">← All numbers</a></p>
+<h1>{{ number.session }}</h1>
+<p>Status: <span class="badge {{ 'good' if waha_status == 'WORKING' else 'bad' }}">{{ waha_status }}</span>{% if number.phone %} · +{{ number.phone }}{% endif %}</p>
+{% if waha_status == "SCAN_QR_CODE" %}
+<p>On the purchased phone open WhatsApp → Settings → Linked devices → Link a device, and scan:</p>
+<img class="qr" src="/admin/numbers/{{ number.session }}/qr.png?t={{ now }}" alt="QR code that links this number">
+<p><small>This page refreshes every 3 seconds.</small></p>
+{% elif waha_status == "WORKING" %}
+<p class="notice ok">Linked. Add this number to the business's WhatsApp groups; it introduces itself there.</p>
+{% elif waha_status == "STARTING" %}
+<p>Starting... this page refreshes every 3 seconds.</p>
+{% else %}
+<p>Not running. Press <em>Relink</em> to start it and get a new QR code.</p>
+{% endif %}
+<div class="grid">
+  <form method="post" action="/admin/numbers/{{ number.session }}/relink">
+    <input type="hidden" name="csrf" value="{{ csrf }}"><button type="submit" class="secondary">Relink</button></form>
+  <form method="post" action="/admin/numbers/{{ number.session }}/logout">
+    <input type="hidden" name="csrf" value="{{ csrf }}"><button type="submit" class="secondary">Log out</button></form>
+  {% if not number.business_id %}
+  <form method="post" action="/admin/numbers/{{ number.session }}/delete">
+    <input type="hidden" name="csrf" value="{{ csrf }}"><button type="submit" class="secondary">Delete</button></form>
+  {% endif %}
+</div>
+<h2>Business</h2>
+<form method="post" action="/admin/numbers/{{ number.session }}/assign">
+  <input type="hidden" name="csrf" value="{{ csrf }}">
+  <select name="business_id" aria-label="Business">
+    <option value="">(unassigned)</option>
+    {% for b in businesses %}<option value="{{ b.id }}"{% if b.id == number.business_id %} selected{% endif %}>{{ b.config.business }}</option>{% endfor %}
+  </select>
+  <button type="submit">Save</button>
+</form>
+<h2>Notes</h2>
+<form method="post" action="/admin/numbers/{{ number.session }}/notes">
+  <input type="hidden" name="csrf" value="{{ csrf }}">
+  <input name="notes" value="{{ number.notes }}" aria-label="Notes">
+  <button type="submit">Save notes</button>
+</form>
+{% endblock %}

@@ -14,7 +14,7 @@ from fastapi import BackgroundTasks, FastAPI, HTTPException, Request, Response
 from fastapi.responses import JSONResponse, PlainTextResponse
 from fastapi.staticfiles import StaticFiles
 
-from app import admin_pages, pages, web
+from app import admin_pages, numbers_pages, pages, web
 from app.auth import Auth
 from app.bot import Bot
 from app.config import Client, Settings
@@ -129,6 +129,7 @@ def create_app(settings: Settings | None = None, bot: Bot | None = None, registr
     app.include_router(web.router)
     app.include_router(pages.router)
     app.include_router(admin_pages.router)
+    app.include_router(numbers_pages.router)
 
     @app.get("/webhooks/meta")
     def meta_verify(request: Request) -> Response:
