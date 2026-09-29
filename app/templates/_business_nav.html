@@ -1,0 +1,12 @@
+<nav class="tabs">
+  <ul>
+    <li><strong>{{ business.config.business }}</strong>{% if not business.active %} <span class="badge bad">paused</span>{% endif %}</li>
+  </ul>
+  <ul>
+    <li><a href="{{ base }}">Home</a></li>
+    <li><a href="{{ base }}/settings">Bot settings</a></li>
+    <li><a href="{{ base }}/staff">Staff &amp; groups</a></li>
+    <li><a href="{{ base }}/sheet">Sheet</a></li>
+    <li><a href="{{ base }}/chats">Chats</a></li>
+  </ul>
+</nav>

@@ -1,0 +1,30 @@
+{% extends "base.html" %}
+{% block content %}
+{% if not business.active %}<p class="notice error">This business is paused: the bot is not answering anyone.</p>{% endif %}
+<div class="grid">
+  <article>
+    <h3>Official number</h3>
+    <p>{% if business.meta_phone_number_id and business.has_meta_token %}Connected (ID {{ business.meta_phone_number_id }}){% else %}Not set up yet{% endif %}</p>
+    <p>Replies this month: <strong id="meta-replies">{{ replies.meta }}</strong><br>
+       <small>Meta charges for replies after 1,000 a month.</small></p>
+  </article>
+  <article>
+    <h3>Group number</h3>
+    <p><span class="badge {{ 'good' if group_status == 'WORKING' else 'bad' }}">{{ group_status }}</span></p>
+    <p>Replies this month: <strong id="group-replies">{{ replies.waha }}</strong></p>
+  </article>
+</div>
+<h2>Latest requests for a human</h2>
+{% if handoff_error %}<p class="notice error">{{ handoff_error }}</p>
+{% elif not handoffs %}<p>None yet.</p>
+{% else %}
+<table>
+  <thead><tr><th>Time</th><th>Name</th><th>Phone</th><th>Question</th><th>Reason</th></tr></thead>
+  <tbody>
+  {% for h in handoffs %}
+    <tr><td>{{ h.Time }}</td><td>{{ h.Name }}</td><td>{{ h.Phone }}</td><td>{{ h.Question }}</td><td>{{ h.Reason }}</td></tr>
+  {% endfor %}
+  </tbody>
+</table>
+{% endif %}
+{% endblock %}

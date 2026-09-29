@@ -1,0 +1,19 @@
+{% extends "base.html" %}
+{% block content %}
+<h1>Chats</h1>
+{% if not chats %}<p>No conversations yet.</p>{% else %}
+<table>
+  <thead><tr><th>Who</th><th>Where</th><th>Last message</th><th>Messages</th></tr></thead>
+  <tbody>
+  {% for c in chats %}
+    <tr>
+      <td><a href="{{ base }}/chat?id={{ c.chat_id|urlencode }}">{% if c.chat_id.endswith('@g.us') %}Group {{ c.chat_id[:10] }}...{% else %}{{ c.name or c.chat_id }}{% endif %}</a></td>
+      <td>{% if c.chat_id.endswith('@g.us') %}Group{% elif c.channel == 'meta' %}Official number{% else %}Group number, private chat{% endif %}</td>
+      <td>{{ c.last_at|localtime(business.config.timezone) }}</td>
+      <td>{{ c.messages }}</td>
+    </tr>
+  {% endfor %}
+  </tbody>
+</table>
+{% endif %}
+{% endblock %}
