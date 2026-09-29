@@ -44,6 +44,17 @@ def test_meta_number_info_for_test_connection():
         meta.number_info("106540352242922", "expired")
 
 
+def test_meta_number_info_hides_the_sent_token_from_its_own_error_message():
+    def handler(request):
+        return httpx.Response(400, json={"error": {"code": 190,
+                                                    "message": "Malformed access token Bearer EAAG-secret-123"}})
+
+    meta = MetaClient(SETTINGS, mock(handler))
+    with pytest.raises(SendError) as exc:
+        meta.number_info("123", token="Bearer EAAG-secret-123")
+    assert "(hidden)" in str(exc.value) and "EAAG-secret-123" not in str(exc.value)
+
+
 def test_waha_session_management_calls():
     calls = []
 

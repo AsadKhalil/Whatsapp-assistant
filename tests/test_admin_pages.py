@@ -38,6 +38,7 @@ def test_adding_a_business_checks_the_sheet_and_goes_live_at_once():
     created = admin.post("/admin/new", data={**form, "action": "create"})
     assert "Business created." in created.text and site.bot.clients["bakehouse"].bot_name == "Noor"
     assert "already exists" in admin.post("/admin/new", data={**form, "action": "create"}).text
+    assert re.search(r'<input name="id"[^>]*required', admin.get("/admin/new").text) is None
 
 
 def test_meta_keys_are_write_only_and_reach_the_bot():

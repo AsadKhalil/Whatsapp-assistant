@@ -5,7 +5,7 @@
 <form method="post">
   <input type="hidden" name="csrf" value="{{ csrf }}">
   <label>Web id (lowercase letters, digits and dashes; it goes into the business's webhook address)
-    <input name="id" value="{{ values.id or '' }}" required></label>
+    <input name="id" value="{{ values.id or '' }}"></label>
   <label>Business name <input name="business" value="{{ values.business or '' }}" required></label>
   <label>Bot name <input name="bot_name" value="{{ values.bot_name or '' }}" required></label>
   <label>Time zone

@@ -178,11 +178,14 @@ def _meta_error_code(response: httpx.Response) -> int | None:
         return None
 
 
-def _meta_error_message(response: httpx.Response) -> str:
+def _meta_error_message(response: httpx.Response, hide: str = "") -> str:
     try:
-        return str((response.json().get("error") or {}).get("message", ""))[:200]
+        message = str((response.json().get("error") or {}).get("message", ""))
     except ValueError:
         return ""
+    if hide:
+        message = message.replace(hide, "(hidden)")
+    return message[:200]
 
 
 class MetaClient:
@@ -233,7 +236,8 @@ class MetaClient:
         except httpx.HTTPError as e:
             raise SendError(f"meta unreachable: {type(e).__name__}") from e
         if r.status_code >= 400:
-            raise SendError(f"meta status={r.status_code} code={_meta_error_code(r)} {_meta_error_message(r)}")
+            raise SendError(f"meta status={r.status_code} code={_meta_error_code(r)} "
+                            f"{_meta_error_message(r, hide=token or self._token)}")
         return r.json()
 
 
