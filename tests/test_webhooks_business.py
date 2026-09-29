@@ -7,8 +7,8 @@ import pytest
 from fastapi.testclient import TestClient
 
 from app.config import Settings
-from app.main import create_app, open_registry
-from tests.fakes import acme_config, registry_with_acme
+from app.main import create_app, maintain, open_registry
+from tests.fakes import acme_config, make_bot, registry_with_acme
 from tests.payloads import META_PNID, meta_text
 
 SETTINGS = Settings(secret_key="test-secret", meta_app_secret="env-secret", meta_verify_token="env-verify")
@@ -103,3 +103,15 @@ def test_first_start_imports_clients_yaml_once(tmp_path):
     assert "sweetbakes" in open_registry(settings).clients()
     (tmp_path / "clients.yaml").write_text("clients: {}\n", encoding="utf-8")
     assert "sweetbakes" in open_registry(settings).clients()  # the database is the source of truth now
+
+
+def test_daily_maintenance_also_purges_paused_businesses(tmp_path):
+    registry = registry_with_acme()
+    registry.set_active("acme", False, actor="t")
+    bot, _ = make_bot()
+    bot.clients = registry.clients()
+    assert "acme" not in bot.clients and "acme" in registry.clients(include_paused=True)
+    now = 1_790_000_000.0
+    bot.store.save_message("acme", "meta", "old", "user-1", "user-1", "Ali", "hi", False, now - 200 * 86_400)
+    maintain(bot, str(tmp_path / "backups"), now, registry.clients(include_paused=True))
+    assert bot.store.history("acme", "user-1", 10) == []

@@ -124,10 +124,11 @@ class Registry:
         row = self.db.one(SELECT_BUSINESS + " WHERE b.id = ?", (business_id,))
         return self._business(row) if row else None
 
-    def clients(self) -> dict[str, Client]:
-        """Every active business as the engine's Client, with its Meta keys opened."""
+    def clients(self, include_paused: bool = False) -> dict[str, Client]:
+        """Every active business as the engine's Client, with its Meta keys opened; paused ones too when asked."""
+        query = SELECT_BUSINESS if include_paused else SELECT_BUSINESS + " WHERE b.active = 1"
         out = {}
-        for row in self.db.all(SELECT_BUSINESS + " WHERE b.active = 1"):
+        for row in self.db.all(query):
             raw = {**json.loads(row["config"]), "meta_phone_number_id": row["meta_phone_number_id"],
                    "waha_session": row["session"]}
             try:

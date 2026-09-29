@@ -29,7 +29,6 @@ DAY = 86_400
 
 
 def build_bot(settings: Settings, clients: dict[str, Client]) -> Bot:
-    logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s %(message)s")
     if settings.log_hash_key == "change-me":
         log.warning("LOG_HASH_KEY is not set; hashed chat ids in the logs can be reversed")
     http = httpx.Client(timeout=30)
@@ -56,10 +55,14 @@ def open_registry(settings: Settings) -> Registry:
     return registry
 
 
-def maintain(bot: Bot, backup_dir: str, now: float) -> None:
-    """Drop expired pending writes and messages past each client's retention, then keep 7 backups."""
+def maintain(bot: Bot, backup_dir: str, now: float, clients: dict[str, Client] | None = None) -> None:
+    """Drop expired pending writes and messages past each client's retention, then keep 7 backups.
+
+    Every business's retention, paused ones too when `clients` is passed (from `registry.clients
+    (include_paused=True)`); defaults to `bot.clients` (active businesses only).
+    """
     bot.store.purge_expired_pending(now)
-    for client in bot.clients.values():
+    for client in (bot.clients if clients is None else clients).values():
         bot.store.delete_older_than(client.id, now - client.retention_days * DAY)
     folder = Path(backup_dir)
     bot.store.backup(str(folder / f"assistant-{time.strftime('%Y%m%d', time.gmtime(now))}.db"))
@@ -69,6 +72,7 @@ def maintain(bot: Bot, backup_dir: str, now: float) -> None:
 
 def create_app(settings: Settings | None = None, bot: Bot | None = None,
                registry: Registry | None = None) -> FastAPI:
+    logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s %(message)s")
     settings = settings or Settings.from_env()
     if not settings.secret_key:
         raise RuntimeError("Set SECRET_KEY in .env (make one with: openssl rand -hex 32), then restart.")
@@ -102,7 +106,8 @@ def create_app(settings: Settings | None = None, bot: Bot | None = None,
         async def daily() -> None:
             while True:
                 try:
-                    await asyncio.to_thread(maintain, bot, settings.backup_dir, time.time())
+                    await asyncio.to_thread(maintain, bot, settings.backup_dir, time.time(),
+                                            registry.clients(include_paused=True))
                 except Exception:
                     log.exception("maintenance_failed")
                 await asyncio.sleep(DAY)
