@@ -1,3 +1,5 @@
+from dataclasses import replace
+
 from app.bot import FALLBACK, role_for
 from app.whatsapp import SendError
 from tests.fakes import call, incoming, make_bot, make_client, say, texts
@@ -153,3 +155,11 @@ def test_failed_send_is_not_stored_and_the_next_message_still_works():
     bot.meta.fail = None
     bot.handle(incoming("hello again"))
     assert texts(bot.meta) == ["Hi, I'm Sara, Sweet Bakes's AI assistant.\n\ntwo"]
+
+
+def test_replies_and_voice_downloads_use_the_businesss_own_meta_token():
+    bot, _ = make_bot(say("Chocolate cake is Rs 2500."), transcript="price of chocolate cake?")
+    bot.clients["acme"] = replace(bot.clients["acme"], meta_access_token="biz-token")
+    bot.meta.audio["voice-1"] = b"OggS"
+    bot.handle(incoming("", kind="audio", audio="voice-1"))
+    assert bot.meta.tokens == ["biz-token", "biz-token"]  # the download, then the reply

@@ -11,7 +11,7 @@ from app.llm import ModelReply, ToolCall
 from app.registry import Registry
 from app.store import Store
 from app.vault import Vault
-from app.whatsapp import Incoming
+from app.whatsapp import Incoming, SendError
 
 
 def make_client(**overrides) -> Client:
@@ -124,15 +124,25 @@ class FakeMeta:
         self.sent: list[tuple[str, str, str | None]] = []
         self.audio: dict[str, bytes] = {}
         self.fail: Exception | None = None
+        self.tokens: list[str | None] = []  # the token of every send and download
+        self.info: dict | Exception = {"display_phone_number": "+1 555 0100", "verified_name": "Sweet Bakes"}
 
-    def send_text(self, phone_number_id: str, to: str, text: str, reply_to: str | None = None) -> str:
+    def send_text(self, phone_number_id: str, to: str, text: str, reply_to: str | None = None,
+                  token: str | None = None) -> str:
         if self.fail:
             raise self.fail
+        self.tokens.append(token)
         self.sent.append((to, text, reply_to))
         return f"wamid.out-{len(self.sent)}"
 
-    def download(self, media_id: str) -> bytes:
+    def download(self, media_id: str, token: str | None = None) -> bytes:
+        self.tokens.append(token)
         return self.audio[media_id]
+
+    def number_info(self, phone_number_id: str, token: str | None = None) -> dict:
+        if isinstance(self.info, Exception):
+            raise self.info
+        return self.info
 
 
 class FakeWaha:
@@ -141,6 +151,11 @@ class FakeWaha:
         self.audio: dict[str, bytes] = {}
         self.statuses: dict[str, str] = {}
         self.fail: Exception | None = None
+        self.created: list[tuple[str, str, str]] = []  # sessions the dashboard created: (name, url, secret)
+        self.calls: list[tuple[str, str]] = []  # (action, session) for create/start/logout/delete/qr
+        self.phones: dict[str, str] = {}  # session -> linked jid, reported once WORKING
+        self.group_list: dict[str, list[dict]] = {}
+        self.manage_fail: Exception | None = None
 
     def send_text(self, session: str, chat_id: str, text: str, reply_to: str | None = None) -> str:
         if self.fail:
@@ -153,6 +168,47 @@ class FakeWaha:
 
     def status(self, session: str) -> str:
         return self.statuses.get(session, "WORKING")
+
+    def _manage(self, action: str, name: str) -> None:
+        if self.manage_fail:
+            raise self.manage_fail
+        self.calls.append((action, name))
+
+    def create_session(self, name: str, webhook_url: str, webhook_secret: str) -> None:
+        self._manage("create", name)
+        self.created.append((name, webhook_url, webhook_secret))
+        self.statuses[name] = "SCAN_QR_CODE"
+
+    def start(self, name: str) -> None:
+        self._manage("start", name)
+        self.statuses[name] = "SCAN_QR_CODE"
+
+    def logout(self, name: str) -> None:
+        self._manage("logout", name)
+        self.statuses[name] = "STOPPED"
+
+    def delete(self, name: str) -> None:
+        self._manage("delete", name)
+        self.statuses.pop(name, None)
+
+    def session_info(self, name: str) -> dict:
+        if self.manage_fail:
+            raise self.manage_fail
+        if name not in self.statuses:
+            raise SendError("waha status=404")
+        info: dict = {"name": name, "status": self.statuses[name]}
+        if name in self.phones:
+            info["me"] = {"id": self.phones[name]}
+        return info
+
+    def qr_png(self, name: str) -> bytes:
+        self._manage("qr", name)
+        return b"\x89PNG fake qr"
+
+    def groups(self, name: str) -> list[dict]:
+        if self.manage_fail:
+            raise self.manage_fail
+        return self.group_list.get(name, [])
 
 
 _ids = itertools.count(1)

@@ -77,7 +77,12 @@ class Bot:
         # WHATSAPP_FILES_LIFETIME (180 s by default), so waiting behind a slow model call could lose it.
         if m.kind == "audio" and m.audio:
             try:
-                m.audio_bytes = self.meta.download(m.audio) if m.channel == "meta" else self.waha.download(m.audio)
+                if m.channel == "meta":
+                    client = self.clients.get(m.client_id)
+                    token = client.meta_access_token if client else ""
+                    m.audio_bytes = self.meta.download(m.audio, token=token or None)
+                else:
+                    m.audio_bytes = self.waha.download(m.audio)
             except Exception:
                 log.exception("audio_download_failed client=%s chat=%s", m.client_id, self._h(m.chat_id))
         # ponytail: one message per chat at a time and no debounce; 3 quick messages get 3 replies.
@@ -292,7 +297,8 @@ class Bot:
         text = text[:MAX_TEXT]
         try:
             if channel == "meta":
-                msg_id = self.meta.send_text(client.meta_phone_number_id, address, text)
+                msg_id = self.meta.send_text(client.meta_phone_number_id, address, text,
+                                             token=client.meta_access_token or None)
             else:
                 msg_id = self.waha.send_text(client.waha_session, address, text, reply_to=reply_to)
         except SendError as e:
