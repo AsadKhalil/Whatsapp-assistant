@@ -1,7 +1,8 @@
-"""HTTP entry points: Meta and WAHA webhooks, health, and the daily maintenance loop."""
+"""HTTP entry points: Meta and WAHA webhooks, health, the dashboard, and the daily maintenance loop."""
 from __future__ import annotations
 
 import asyncio
+import hmac
 import json
 import logging
 import time
@@ -13,10 +14,13 @@ from fastapi import BackgroundTasks, FastAPI, Request, Response
 from fastapi.responses import JSONResponse, PlainTextResponse
 
 from app.bot import Bot
-from app.config import Settings, load_clients
+from app.config import Client, Settings
+from app.db import Db
 from app.llm import LLM
+from app.registry import Registry
 from app.sheets import Sheets
 from app.store import Store
+from app.vault import Vault
 from app.whatsapp import (GroupJoin, MetaClient, WahaClient, parse_meta, parse_waha, verify_meta_signature,
                           verify_waha_hmac)
 
@@ -24,7 +28,7 @@ log = logging.getLogger("app")
 DAY = 86_400
 
 
-def build_bot(settings: Settings) -> Bot:
+def build_bot(settings: Settings, clients: dict[str, Client]) -> Bot:
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s %(message)s")
     if settings.log_hash_key == "change-me":
         log.warning("LOG_HASH_KEY is not set; hashed chat ids in the logs can be reversed")
@@ -35,9 +39,21 @@ def build_bot(settings: Settings) -> Bot:
         llm=LLM(settings),
         meta=MetaClient(settings, http),
         waha=WahaClient(settings, http),
-        clients=load_clients(settings.clients_file),
+        clients=clients,
         log_key=settings.log_hash_key,
     )
+
+
+def open_registry(settings: Settings) -> Registry:
+    """The dashboard's database; the very first start imports clients.yaml (the v1 settings) once."""
+    registry = Registry(Db(settings.db_path), Vault(settings.secret_key))
+    if Path(settings.clients_file).is_file():
+        if registry.is_empty():
+            count = registry.import_yaml(settings.clients_file, settings)
+            log.info("imported %s business(es) from %s", count, settings.clients_file)
+        else:
+            log.info("clients.yaml is ignored: businesses are managed in the dashboard")
+    return registry
 
 
 def maintain(bot: Bot, backup_dir: str, now: float) -> None:
@@ -51,11 +67,35 @@ def maintain(bot: Bot, backup_dir: str, now: float) -> None:
         old.unlink()
 
 
-def create_app(settings: Settings | None = None, bot: Bot | None = None) -> FastAPI:
+def create_app(settings: Settings | None = None, bot: Bot | None = None,
+               registry: Registry | None = None) -> FastAPI:
     settings = settings or Settings.from_env()
-    bot = bot or build_bot(settings)
-    by_phone = {c.meta_phone_number_id: c for c in bot.clients.values() if c.meta_phone_number_id}
-    by_session = {c.waha_session: c for c in bot.clients.values() if c.waha_session}
+    if not settings.secret_key:
+        raise RuntimeError("Set SECRET_KEY in .env (make one with: openssl rand -hex 32), then restart.")
+    registry = registry or open_registry(settings)
+    bot = bot or build_bot(settings, registry.clients())
+
+    def reload() -> None:
+        """Hand freshly saved settings to the bot; its next message uses them."""
+        bot.clients = registry.clients()
+
+    def sessions() -> dict[str, Client]:
+        return {c.waha_session: c for c in bot.clients.values() if c.waha_session}
+
+    def env_app_phones() -> dict[str, Client]:
+        """The v1 /webhooks/meta address serves only businesses on the .env Meta app."""
+        return {c.meta_phone_number_id: c for c in bot.clients.values() if c.meta_phone_number_id
+                and (not c.meta_app_secret or c.meta_app_secret == settings.meta_app_secret)}
+
+    def queue_meta(body: bytes, phones: dict[str, Client], tasks: BackgroundTasks) -> Response:
+        try:
+            messages = parse_meta(json.loads(body), phones)
+        except (ValueError, AttributeError, TypeError):
+            log.warning("meta_webhook_unparsable")  # still a 200: the signature was valid
+            messages = []
+        for m in messages:
+            tasks.add_task(bot.handle, m)  # Meta retries slow answers, so reply 200 first and work after
+        return JSONResponse({"ok": True})
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
@@ -72,6 +112,7 @@ def create_app(settings: Settings | None = None, bot: Bot | None = None) -> Fast
         task.cancel()
 
     app = FastAPI(lifespan=lifespan, docs_url=None, redoc_url=None, openapi_url=None)
+    app.state.settings, app.state.registry, app.state.bot, app.state.reload = settings, registry, bot, reload
 
     @app.get("/webhooks/meta")
     def meta_verify(request: Request) -> Response:
@@ -86,14 +127,27 @@ def create_app(settings: Settings | None = None, bot: Bot | None = None) -> Fast
         body = await request.body()
         if not verify_meta_signature(settings.meta_app_secret, body, request.headers.get("x-hub-signature-256")):
             return Response(status_code=403)
-        try:
-            messages = parse_meta(json.loads(body), by_phone)
-        except (ValueError, AttributeError, TypeError):
-            log.warning("meta_webhook_unparsable")  # still a 200: the signature was valid
-            messages = []
-        for m in messages:
-            tasks.add_task(bot.handle, m)  # Meta retries slow answers, so reply 200 first and work after
-        return JSONResponse({"ok": True})
+        return queue_meta(body, env_app_phones(), tasks)
+
+    @app.get("/webhooks/meta/{business_id}")
+    def business_meta_verify(business_id: str, request: Request) -> Response:
+        client, q = bot.clients.get(business_id), request.query_params
+        if (client and client.meta_verify_token and q.get("hub.mode") == "subscribe"
+                and hmac.compare_digest(q.get("hub.verify_token", "").encode(), client.meta_verify_token.encode())):
+            return PlainTextResponse(q.get("hub.challenge", ""))
+        return Response(status_code=403)
+
+    @app.post("/webhooks/meta/{business_id}")
+    async def business_meta_webhook(business_id: str, request: Request, tasks: BackgroundTasks) -> Response:
+        client = bot.clients.get(business_id)
+        if client is None:  # a paused business still gets its 200, so Meta stops retrying
+            return Response(status_code=200 if registry.business(business_id) else 404)
+        body = await request.body()
+        if not verify_meta_signature(client.meta_app_secret, body, request.headers.get("x-hub-signature-256")):
+            return Response(status_code=403)
+        # Only this business's own number: another business's Meta app can't inject messages through here.
+        own = {client.meta_phone_number_id: client} if client.meta_phone_number_id else {}
+        return queue_meta(body, own, tasks)
 
     @app.post("/webhooks/waha")
     async def waha_webhook(request: Request, tasks: BackgroundTasks) -> Response:
@@ -101,7 +155,7 @@ def create_app(settings: Settings | None = None, bot: Bot | None = None) -> Fast
         if not verify_waha_hmac(settings.waha_webhook_secret, body, request.headers):
             return Response(status_code=403)
         try:
-            event = parse_waha(json.loads(body), by_session)
+            event = parse_waha(json.loads(body), sessions())
         except (ValueError, AttributeError, TypeError):
             log.warning("waha_webhook_unparsable")
             event = None
@@ -113,8 +167,8 @@ def create_app(settings: Settings | None = None, bot: Bot | None = None) -> Fast
 
     @app.get("/health")
     def health() -> JSONResponse:
-        sessions = {name: bot.waha.status(name) for name in by_session}
-        ok = bot.store.writable() and all(status == "WORKING" for status in sessions.values())
-        return JSONResponse({"ok": ok, "waha": sessions}, status_code=200 if ok else 503)
+        statuses = {name: bot.waha.status(name) for name in sessions()}
+        ok = bot.store.writable() and all(status == "WORKING" for status in statuses.values())
+        return JSONResponse({"ok": ok, "waha": statuses}, status_code=200 if ok else 503)
 
     return app
