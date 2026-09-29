@@ -107,9 +107,10 @@ def client_from_dict(client_id: str, c: dict) -> Client:
         ZoneInfo(timezone)
     except (ZoneInfoNotFoundError, ValueError):
         raise ValueError(f"{client_id}: unknown timezone {timezone!r}") from None
+    days = c.get("retention_days")
     try:
-        retention_days = int(c.get("retention_days") or 90)
-    except (TypeError, ValueError):
+        retention_days = 90 if days in (None, "") else int(str(days))
+    except ValueError:
         raise ValueError(f"{client_id}: retention_days must be a whole number of days") from None
     if not 1 <= retention_days <= 3650:
         raise ValueError(f"{client_id}: retention_days must be between 1 and 3650")

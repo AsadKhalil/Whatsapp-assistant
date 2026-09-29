@@ -73,6 +73,8 @@ def test_client_from_dict_matches_the_yaml_loader_and_hides_secrets():
     ({"bot_name": None}, "bot_name is required"),
     ({"retention_days": 5000}, "between 1 and 3650"),
     ({"retention_days": "abc"}, "whole number"),
+    ({"retention_days": 90.5}, "whole number"),
+    ({"retention_days": 0}, "between 1 and 3650"),
 ])
 def test_client_from_dict_explains_what_is_wrong(change, message):
     raw = {"business": "B", "bot_name": "S", "sheet_id": "s", **change}
