@@ -186,8 +186,8 @@ allowed to read and write the client's Sheet without ever knowing the client's G
    ```
 
    Field by field:
-   - **`sweetbakes`** (the top key): a short internal id for this client — letters/numbers, no spaces. Used
-     internally only; customers never see it.
+   - **`sweetbakes`** (the top key): a short internal id for this client — 3–32 lowercase letters, digits or
+     dashes (for example `sweetbakes`). Used internally only; customers never see it.
    - **`business`**: the business's name, as the AI will say it to customers.
    - **`bot_name`**: what the bot calls itself, e.g. "Sara".
    - **`timezone`**: a real IANA timezone name (e.g. `Asia/Karachi`, `America/New_York`) — an invalid name
@@ -203,8 +203,9 @@ allowed to read and write the client's Sheet without ever knowing the client's G
      `Handoffs` if you leave these out).
    - **`meta_phone_number_id`**: from Part C — the internal ID Meta assigns the number, not the phone number
      itself. Keep the quote marks; it's a long number and YAML can otherwise mangle it.
-   - **`waha_session`**: a short id you invent for this client's WAHA connection (letters/numbers, no spaces).
-     You'll create a WAHA session with this *exact* name in Part G — they must match.
+   - **`waha_session`**: a short id you invent for this client's WAHA connection — 3–32 lowercase letters,
+     digits or dashes (for example `sweetbakes`). You'll create a WAHA session with this *exact* name in Part G —
+     they must match.
    - **`staff_chats`**: WhatsApp group ids (see [glossary](#15-glossary)) where *everyone* is treated as staff.
      You'll get these ids in Part G, once the group number exists.
    - **`staff_numbers`**: full phone numbers with country code, exactly as WhatsApp reports them. Staff are
@@ -629,7 +630,7 @@ The engine has a web dashboard at `https://<your-domain>/`. **You** (the admin) 
    grep SECRET_KEY .env
    ```
    You should see: `SECRET_KEY=` followed by a long random value. If it's empty, put one in with `openssl rand -hex 32` and run `docker compose up -d`.
-   > **Warning:** keep `SECRET_KEY` safe and don't change it. It encrypts the Meta keys saved in the dashboard; if it changes, you must re-enter every business's Meta keys.
+   > **Warning:** keep `SECRET_KEY` safe and don't change it. It encrypts the Meta keys saved in the dashboard; if it changes, you must re-enter every business's Meta keys. Every admin must also reset their two-step login with `docker compose exec engine python -m app.cli admin-link <their email>`.
 2. Create your login.
    **bash, on the server:**
    ```bash
@@ -669,7 +670,7 @@ A business that stops paying: open it and press **Pause business**. The bot igno
 
 ### Upgrading from clients.yaml
 
-If you ran the engine before the dashboard existed: add `SECRET_KEY` to `.env`, then run `git pull` and `docker compose up -d --build`. On that first start the engine copies `clients.yaml` and the Meta keys from `.env` into the dashboard database, once. After that, change settings only in the dashboard (`clients.yaml` is ignored). The first business keeps working on the old webhook address `https://<your-domain>/webhooks/meta`; switch it to its own address (on its Official number tab) whenever convenient.
+If you ran the engine before the dashboard existed: add `SECRET_KEY` to `.env`, then run `git pull` and `docker compose up -d --build`. On that first start the engine copies `clients.yaml` and the Meta keys from `.env` into the dashboard database, once. After that, change settings only in the dashboard (`clients.yaml` is ignored). The first business keeps working on the old webhook address `https://<your-domain>/webhooks/meta`; switch it to its own address (on its Official number tab) whenever convenient. If the engine refuses to start and names a client id or `waha_session`, fix that name in `clients.yaml` and start it again; nothing is imported until every entry is valid.
 
 ## 14. Day-to-Day Tasks
 

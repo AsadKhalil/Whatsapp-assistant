@@ -231,8 +231,11 @@ def sheet_page(request: Request, scope: Scope, form: Form | None) -> Response:
             error = sheet_problem or "Reload the page and try again."
         else:
             tabs, problems = tabs_from_form(form, sheet_tabs)
-            config.update(tabs=tabs, knowledge_tab=form.get("knowledge_tab") or "Knowledge",
-                          handoff_tab=form.get("handoff_tab") or "Handoffs")
+            knowledge = form.get("knowledge_tab")
+            handoff = form.get("handoff_tab")
+            # only a tab this request read: the bot reads a missing Knowledge tab as empty, which fails safe
+            config.update(tabs=tabs, knowledge_tab=knowledge if knowledge in sheet_tabs else "Knowledge",
+                          handoff_tab=handoff if handoff in sheet_tabs else "Handoffs")
             if problems:
                 error = " ".join(problems)
             elif action.startswith("preview:"):

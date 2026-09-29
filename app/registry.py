@@ -136,8 +136,10 @@ class Registry:
             except ValueError:
                 log.exception("business_config_invalid business=%s", row["id"])
                 continue
+            # an app secret that can't be opened becomes one no signature matches, so both webhooks fail closed
+            app_secret = self._open(row["meta_app_secret"])
             out[client.id] = replace(client, meta_access_token=self._open(row["meta_access_token"]) or "",
-                                     meta_app_secret=self._open(row["meta_app_secret"]) or "",
+                                     meta_app_secret=secrets.token_hex(32) if app_secret is None else app_secret,
                                      meta_verify_token=row["meta_verify_token"])
         return out
 
@@ -266,6 +268,7 @@ class Registry:
         """First start only: copy clients.yaml, and the pilot's .env Meta keys, into the database."""
         entries = {str(k): dict(v or {}) for k, v in
                    ((yaml.safe_load(Path(path).read_text(encoding="utf-8")) or {}).get("clients") or {}).items()}
+        seen: set[tuple[str, str]] = set()
         for business_id, entry in entries.items():  # check everything before writing anything
             if not SLUG.fullmatch(business_id):
                 raise ValueError(f"Rename {business_id!r} in clients.yaml: web ids are 3-32 lowercase letters, "
@@ -274,6 +277,17 @@ class Registry:
             if unknown:
                 raise ValueError(f"{business_id}: unknown settings {', '.join(sorted(unknown))}")
             client_from_dict(business_id, entry)
+            session = str(entry.get("waha_session") or "")
+            if session and not SLUG.fullmatch(session):
+                raise ValueError(f"{business_id}: waha_session {session!r} must be 3-32 lowercase letters, "
+                                 "digits or dashes")
+            phone_number_id = str(entry.get("meta_phone_number_id") or "").strip()
+            if phone_number_id and not phone_number_id.isdigit():
+                raise ValueError(f"{business_id}: meta_phone_number_id must be digits")
+            for key, value in (("waha_session", session), ("meta_phone_number_id", phone_number_id)):
+                if value and (key, value) in seen:
+                    raise ValueError(f"{business_id}: {key} {value!r} is already used by another client")
+                seen.add((key, value))
         for business_id, entry in entries.items():
             phone_number_id = str(entry.pop("meta_phone_number_id", "") or "")
             session = entry.pop("waha_session", None)

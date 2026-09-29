@@ -77,6 +77,17 @@ def test_assigning_a_group_number_moves_the_bot_to_it():
     assert site.bot.clients["acme"].waha_session is None
 
 
+def test_the_group_number_page_wont_take_another_business_number():
+    site = Site()
+    site.registry.create_business("other", {**acme_config(), "business": "Other Co"}, actor="t")
+    site.registry.add_number("other-1", "", actor="t")
+    site.registry.assign_number("other-1", "other", actor="t")
+    admin = site.admin()
+    r = admin.post("/admin/b/acme/number", data={"csrf": csrf(admin, "/admin/b/acme/number"), "session": "other-1"})
+    assert "belongs to another business" in r.text
+    assert site.registry.number("other-1").business_id == "other" and site.registry.business("acme").number == "acme"
+
+
 def test_business_logins_invite_new_link_and_disable():
     site = Site()
     site.registry.create_business("other", {**acme_config(), "business": "Other Co"}, actor="t")

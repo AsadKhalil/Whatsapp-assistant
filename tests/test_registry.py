@@ -70,6 +70,7 @@ def test_keys_sealed_with_another_secret_key_need_re_entering():
     assert other.business("acme").keys_unreadable is True
     client = other.clients()["acme"]
     assert client.meta_access_token == "" and client.bot_name == "Sara"
+    assert client.meta_app_secret not in ("", "acme-secret")  # no webhook signature matches it: fails closed
 
 
 def test_paused_businesses_leave_the_engine():
@@ -117,5 +118,22 @@ def test_an_invalid_clients_yaml_imports_nothing(tmp_path):
                     encoding="utf-8")
     registry = memory_registry()
     with pytest.raises(ValueError, match="timezone"):
+        registry.import_yaml(str(path), Settings())
+    assert registry.is_empty()
+
+
+@pytest.mark.parametrize("extras, message", [
+    (["waha_session: SweetBakes"], "waha_session 'SweetBakes' must be"),
+    (["waha_session: shared", "waha_session: shared"], "waha_session 'shared'"),
+    (["meta_phone_number_id: '1065-4035'"], "meta_phone_number_id must be digits"),
+    (["meta_phone_number_id: '106'", "meta_phone_number_id: '106'"], "meta_phone_number_id '106'"),
+])
+def test_a_bad_or_repeated_number_imports_nothing(tmp_path, extras, message):
+    entries = "".join(f"  shop{i}:\n    business: B\n    bot_name: S\n    sheet_id: s\n    {extra}\n"
+                      for i, extra in enumerate(extras))  # one valid entry per extra setting: shop0, shop1, ...
+    path = tmp_path / "clients.yaml"
+    path.write_text("clients:\n" + entries, encoding="utf-8")
+    registry = memory_registry()
+    with pytest.raises(ValueError, match=message):
         registry.import_yaml(str(path), Settings())
     assert registry.is_empty()

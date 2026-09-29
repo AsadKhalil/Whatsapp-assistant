@@ -14,7 +14,7 @@ from dataclasses import dataclass
 from urllib.parse import quote
 
 from app.db import Db
-from app.vault import Vault
+from app.vault import Vault, VaultError
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS users (
@@ -273,7 +273,10 @@ class Auth:
         if row is None:
             raise AuthError("Your session ended. Log in again.")
         if row["totp_pending"]:
-            return self.vault.open(row["totp_pending"])
+            try:
+                return self.vault.open(row["totp_pending"])
+            except VaultError:
+                pass  # sealed with another SECRET_KEY: start the setup again with a fresh secret
         secret = new_totp_secret()
         self.db.write("UPDATE sessions SET totp_pending = ? WHERE token_hash = ?",
                       (self.vault.seal(secret), _sha(token)))
@@ -288,7 +291,11 @@ class Auth:
         if not self.limits.attempt(key, now):
             raise AuthError("Too many wrong codes. Wait 15 minutes and try again.")
         sealed = row["totp_secret"] or row["totp_pending"]
-        step = totp_step(self.vault.open(sealed), code, now) if sealed else None
+        try:
+            step = totp_step(self.vault.open(sealed), code, now) if sealed else None
+        except VaultError:
+            raise AuthError("Your two-step login can't be read (was SECRET_KEY changed?). "
+                            "Get a new link: python -m app.cli admin-link <your email>.") from None
         if step is None:
             return False
         with self.db.transaction():

@@ -4,6 +4,7 @@ import pytest
 
 import app.auth
 from app.auth import Auth, AuthError, RateLimit, hash_password, new_totp_secret, totp, totp_ok, verify_password
+from app.vault import Vault
 from tests.fakes import registry_with_acme
 
 NOW = 1_790_000_000.0
@@ -17,7 +18,8 @@ def make_auth():
     return Auth(registry.db, registry.vault, clock=lambda: clock[0]), clock
 
 
-def test_passwords_are_salted_scrypt_hashes():
+def test_passwords_are_salted_scrypt_hashes(monkeypatch):
+    monkeypatch.setattr(app.auth, "SCRYPT_N", 2**14)  # the production cost (tests/conftest.py lowers it)
     stored = hash_password(PASSWORD)
     assert stored.startswith("scrypt$16384$8$1$") and "horse" not in stored
     assert stored != hash_password(PASSWORD)
@@ -112,6 +114,28 @@ def test_wrong_codes_are_rate_limited():
         assert auth.pass_totp(cookie, "000000") is False
     with pytest.raises(AuthError, match="Too many wrong codes"):
         auth.pass_totp(cookie, "000000")
+
+
+def test_a_changed_secret_key_sends_admins_to_admin_link():
+    auth, _ = make_auth()
+    auth.accept_invite(auth.invite("a@example.com", "", "admin", None), PASSWORD)
+    cookie, _ = auth.login("a@example.com", PASSWORD)
+    secret = auth.totp_setup_secret(cookie)
+    assert auth.pass_totp(cookie, totp(secret, NOW)) is True
+    moved = Auth(auth.db, Vault("a-different-key"), clock=auth.clock)
+    cookie, _ = moved.login("a@example.com", PASSWORD)  # the password still works
+    with pytest.raises(AuthError, match="admin-link"):
+        moved.pass_totp(cookie, totp(secret, NOW))
+
+
+def test_an_unfinished_two_step_setup_starts_again_after_a_secret_key_change():
+    auth, _ = make_auth()
+    auth.accept_invite(auth.invite("a@example.com", "", "admin", None), PASSWORD)
+    cookie, _ = auth.login("a@example.com", PASSWORD)
+    old = auth.totp_setup_secret(cookie)
+    moved = Auth(auth.db, Vault("a-different-key"), clock=auth.clock)
+    fresh = moved.totp_setup_secret(cookie)
+    assert fresh != old and moved.pass_totp(cookie, totp(fresh, NOW)) is True
 
 
 def test_new_links_and_disabling_end_every_session():

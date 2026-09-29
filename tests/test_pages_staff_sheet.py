@@ -88,6 +88,21 @@ def test_permissions_save_from_the_real_sheet_tabs():
     assert tabs["Orders"].fill == {"Name": "name", "Phone": "phone"} and tabs["Expenses"].customer == frozenset()
 
 
+def test_a_missing_knowledge_tab_is_never_swapped_for_another_tab():
+    site = Site()
+    site.bot.sheets.tabs = {tab: site.bot.sheets.tabs[tab] for tab in ("Orders", "Prices", "Handoffs")}
+    http = site.business_user()
+    page = http.get("/app/sheet").text  # nothing matches "Knowledge", so a browser sends the first option
+    assert '<select name="knowledge_tab"><option value="">(none)</option>' in page
+    assert '<select name="handoff_tab"><option value="">(none)</option>' in page
+    i = indexes(site)
+    data = {"csrf": csrf(http, "/app/sheet"), "action": "save", "tabs_listed": "1", "handoff_tab": "Handoffs",
+            f"use{i['Prices']}": "on", f"read{i['Prices']}": "on"}
+    for posted in ("", "Nope"):
+        assert "Saved." in http.post("/app/sheet", data={**data, "knowledge_tab": posted}).text
+        assert site.bot.clients["acme"].knowledge_tab == "Knowledge"
+
+
 def test_read_all_on_a_tab_with_contact_columns_needs_an_extra_tick():
     site = Site()
     http = site.business_user()

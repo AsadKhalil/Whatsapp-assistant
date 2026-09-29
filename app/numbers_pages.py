@@ -113,8 +113,12 @@ def logout_number(request: Request, sess: Session, form: Form | None) -> Respons
 @route(router, "/admin/numbers/{session}/assign", admin_only, ("POST",))
 def assign(request: Request, sess: Session, form: Form | None) -> Response:
     state, number = request.app.state, _number(request)
+    business_id = form.get("business_id") or None
+    if business_id and number.business_id not in (None, business_id):
+        return _link_page(request, sess, number,
+                          error="That number belongs to another business; unassign it there first.")
     try:
-        state.registry.assign_number(number.session, form.get("business_id") or None, actor=str(sess.user.id))
+        state.registry.assign_number(number.session, business_id, actor=str(sess.user.id))
     except ValueError as e:
         return _link_page(request, sess, number, error=str(e))
     state.reload()

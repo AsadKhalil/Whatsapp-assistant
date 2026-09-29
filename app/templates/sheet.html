@@ -20,10 +20,10 @@
   <input type="hidden" name="tabs_listed" value="1">
   <div class="grid">
     <label>Knowledge tab (read into every answer)
-      <select name="knowledge_tab">{% for t in sheet_tabs %}<option{% if t == config.knowledge_tab %} selected{% endif %}>{{ t }}</option>{% endfor %}</select>
+      <select name="knowledge_tab"><option value="">(none)</option>{% for t in sheet_tabs %}<option{% if t == config.knowledge_tab %} selected{% endif %}>{{ t }}</option>{% endfor %}</select>
     </label>
     <label>Handoffs tab (where "needs a person" rows go)
-      <select name="handoff_tab">{% for t in sheet_tabs %}<option{% if t == config.handoff_tab %} selected{% endif %}>{{ t }}</option>{% endfor %}</select>
+      <select name="handoff_tab"><option value="">(none)</option>{% for t in sheet_tabs %}<option{% if t == config.handoff_tab %} selected{% endif %}>{{ t }}</option>{% endfor %}</select>
     </label>
   </div>
   {% for tab, headers in sheet_tabs.items() %}

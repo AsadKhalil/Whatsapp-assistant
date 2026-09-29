@@ -1,4 +1,5 @@
 from app.whatsapp import SendError
+from tests.fakes import acme_config
 from tests.webkit import Site, csrf
 
 
@@ -52,6 +53,18 @@ def test_assigning_from_the_number_page_and_deleting_only_free_numbers():
     r = admin.post("/admin/numbers/shop-2/delete", data={"csrf": token})
     assert "Number deleted." in r.text and site.registry.number("shop-2") is None
     assert ("delete", "shop-2") in site.bot.waha.calls
+
+
+def test_a_number_is_never_taken_from_another_business():
+    site = Site()
+    site.registry.create_business("other", {**acme_config(), "business": "Other Co"}, actor="t")
+    site.registry.add_number("other-1", "", actor="t")
+    site.registry.assign_number("other-1", "other", actor="t")
+    admin = site.admin()
+    r = admin.post("/admin/numbers/other-1/assign",
+                   data={"csrf": csrf(admin, "/admin/numbers/other-1"), "business_id": "acme"})
+    assert "belongs to another business" in r.text
+    assert site.registry.number("other-1").business_id == "other" and site.registry.business("acme").number == "acme"
 
 
 def test_numbers_page_survives_waha_being_down():

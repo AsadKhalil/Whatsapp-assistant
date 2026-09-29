@@ -19,7 +19,7 @@ uv run pytest
 uv run ruff check .
 ```
 
-Run against real services with `uv run --env-file .env uvicorn app.main:create_app --factory --port 8000`. It needs
+Run against real services with `uv run --env-file .env uvicorn app.main:create_app --factory --no-access-log --port 8000`. It needs
 `.env` (with `SECRET_KEY`), the Google key in `secrets/` and, on the first start only, `clients.yaml`. Run a single worker (the default): the per-chat locks and
 the SQLite connection live in one process.
 
@@ -29,7 +29,7 @@ the SQLite connection live in one process.
 - **Admins** see every business and number: add a business, paste its Meta keys, link purchased numbers by QR code, invite logins, pause a business, and read chats and the audit log.
 - **Each business** logs in to change its bot settings, staff, groups and Sheet permissions, and to read its chats.
 
-1. Set `SECRET_KEY` in `.env` (`openssl rand -hex 32`). The engine won't start without it. It encrypts the Meta keys stored in the database, so changing it means re-entering them.
+1. Set `SECRET_KEY` in `.env` (`openssl rand -hex 32`). The engine won't start without it. It encrypts the Meta keys stored in the database, so changing it means re-entering them. Every admin also resets their two-step login with `python -m app.cli admin-link` (step 3).
 2. Run `docker compose up -d --build`, then create your admin login: `docker compose exec engine python -m app.cli create-admin you@example.com`. Open the printed link, set a password, and set up two-step login with an authenticator app.
 3. Locked out? `docker compose exec engine python -m app.cli admin-link you@example.com` prints a fresh link (it resets the password and the two-step login).
 4. Each business has its own Meta webhook address, `https://$DOMAIN/webhooks/meta/<business-id>`, shown with its verify token on the business's *Official number* page.

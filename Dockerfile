@@ -7,4 +7,4 @@ COPY pyproject.toml uv.lock .python-version ./
 RUN uv sync --frozen --no-dev
 COPY app ./app
 EXPOSE 8000
-CMD ["/srv/.venv/bin/uvicorn", "app.main:create_app", "--factory", "--host", "0.0.0.0", "--port", "8000"]
+CMD ["/srv/.venv/bin/uvicorn", "app.main:create_app", "--factory", "--no-access-log", "--host", "0.0.0.0", "--port", "8000"]
