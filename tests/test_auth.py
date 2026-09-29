@@ -1,6 +1,9 @@
+import threading
+
 import pytest
 
-from app.auth import Auth, AuthError, hash_password, new_totp_secret, totp, totp_ok, verify_password
+import app.auth
+from app.auth import Auth, AuthError, RateLimit, hash_password, new_totp_secret, totp, totp_ok, verify_password
 from tests.fakes import registry_with_acme
 
 NOW = 1_790_000_000.0
@@ -133,3 +136,60 @@ def test_logout_ends_the_session():
     cookie, _ = auth.login("o@example.com", PASSWORD)
     auth.logout(cookie)
     assert auth.session(cookie) is None
+
+
+def test_rate_limit_allows_five_tries_then_pauses():
+    limits = RateLimit()
+    assert [limits.attempt("k", 0.0) for _ in range(7)] == [True] * 5 + [False, False]
+
+
+def test_rate_limit_is_safe_under_concurrent_attempts():
+    limits = RateLimit()
+    barrier = threading.Barrier(20)
+    results = [None] * 20
+
+    def go(i):
+        barrier.wait()
+        results[i] = limits.attempt("k", 0.0)
+
+    threads = [threading.Thread(target=go, args=(i,)) for i in range(20)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+    assert results.count(True) == 5
+
+
+def test_a_reset_during_login_wins(monkeypatch):
+    auth, _ = make_auth()
+    user = auth.accept_invite(auth.invite("o@example.com", "", "business", "acme"), PASSWORD)
+    real_verify = app.auth.verify_password
+
+    def racing_verify(password, stored):
+        ok = real_verify(password, stored)
+        auth.new_link(user.id)  # a reset lands between the password check and the session insert
+        return ok
+
+    monkeypatch.setattr(app.auth, "verify_password", racing_verify)
+    with pytest.raises(AuthError, match="Wrong email or password"):
+        auth.login("o@example.com", PASSWORD)
+    assert auth.db.all("SELECT * FROM sessions") == []
+
+
+def test_totp_codes_are_single_use():
+    auth, clock = make_auth()
+    auth.accept_invite(auth.invite("a@example.com", "", "admin", None), PASSWORD)
+    first, _ = auth.login("a@example.com", PASSWORD)
+    secret = auth.totp_setup_secret(first)
+    code = totp(secret, clock[0])
+    assert auth.pass_totp(first, code) is True
+    second, _ = auth.login("a@example.com", PASSWORD)
+    assert auth.pass_totp(second, code) is False  # already used, in a different session too
+    assert auth.pass_totp(second, "１２３４５６") is False  # full-width digits: refused, not a crash
+
+
+def test_login_limiter_keys_are_hashed_not_raw_emails():
+    auth, _ = make_auth()
+    with pytest.raises(AuthError, match="Wrong email or password"):
+        auth.login("x" * 1000 + "@example.com", "bad")
+    assert all(len(key) < 100 for key in auth.limits._tries)

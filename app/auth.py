@@ -7,8 +7,9 @@ import hmac
 import secrets
 import sqlite3
 import struct
+import threading
 import time
-from collections import defaultdict, deque
+from collections import deque
 from dataclasses import dataclass
 from urllib.parse import quote
 
@@ -24,6 +25,7 @@ CREATE TABLE IF NOT EXISTS users (
   business_id TEXT REFERENCES businesses(id),
   password_hash TEXT,
   totp_secret TEXT,
+  totp_step INTEGER,
   invite_hash TEXT,
   invite_expires REAL,
   disabled INTEGER NOT NULL DEFAULT 0,
@@ -101,9 +103,19 @@ def totp(secret: str, at: float) -> str:
     return f"{(struct.unpack('>I', mac[offset:offset + 4])[0] & 0x7FFFFFFF) % 1_000_000:06d}"
 
 
-def totp_ok(secret: str, code: str, at: float) -> bool:
+def totp_step(secret: str, code: str, at: float) -> int | None:
+    """The 30-second step whose code matches (one step of drift either way), or None."""
     code = code.replace(" ", "").strip()
-    return any(hmac.compare_digest(totp(secret, at + drift * 30), code) for drift in (-1, 0, 1))
+    if len(code) != 6 or not code.isascii() or not code.isdigit():
+        return None
+    for step in (int(at // 30) - 1, int(at // 30), int(at // 30) + 1):
+        if hmac.compare_digest(totp(secret, step * 30), code):
+            return step
+    return None
+
+
+def totp_ok(secret: str, code: str, at: float) -> bool:
+    return totp_step(secret, code, at) is not None
 
 
 def totp_uri(secret: str, email: str) -> str:
@@ -111,27 +123,42 @@ def totp_uri(secret: str, email: str) -> str:
 
 
 class RateLimit:
-    """MAX_FAILURES failures within PAUSE seconds pause a key for PAUSE seconds (in memory)."""
+    """At most MAX_FAILURES tries per key within PAUSE seconds, then a PAUSE-second pause (in memory).
+
+    Each try is recorded under a lock before the slow check, so simultaneous requests can't get past the limit;
+    a success clears the key.
+    """
 
     def __init__(self) -> None:
-        self._failures: defaultdict[str, deque[float]] = defaultdict(deque)
+        self._lock = threading.Lock()
+        self._tries: dict[str, deque[float]] = {}
         self._until: dict[str, float] = {}
 
-    def blocked(self, key: str, now: float) -> bool:
-        return self._until.get(key, 0.0) > now
-
-    def fail(self, key: str, now: float) -> None:
-        failures = self._failures[key]
-        failures.append(now)
-        while failures and failures[0] <= now - PAUSE:
-            failures.popleft()
-        if len(failures) >= MAX_FAILURES:
-            self._until[key] = now + PAUSE
-            failures.clear()
+    def attempt(self, key: str, now: float) -> bool:
+        """Record a try; False (nothing recorded) while the key is paused or has used up its tries."""
+        with self._lock:
+            if len(self._tries) + len(self._until) > 10_000:
+                self._sweep(now)
+            if self._until.get(key, 0.0) > now:
+                return False
+            tries = self._tries.setdefault(key, deque())
+            while tries and tries[0] <= now - PAUSE:
+                tries.popleft()
+            if len(tries) >= MAX_FAILURES:
+                del self._tries[key]
+                self._until[key] = now + PAUSE
+                return False
+            tries.append(now)
+            return True
 
     def clear(self, key: str) -> None:
-        self._failures.pop(key, None)
-        self._until.pop(key, None)
+        with self._lock:
+            self._tries.pop(key, None)
+            self._until.pop(key, None)
+
+    def _sweep(self, now: float) -> None:
+        self._tries = {k: t for k, t in self._tries.items() if t and t[-1] > now - PAUSE}
+        self._until = {k: u for k, u in self._until.items() if u > now}
 
 
 class Auth:
@@ -210,19 +237,22 @@ class Auth:
         return user
 
     def login(self, email: str, password: str) -> tuple[str, User]:
-        key, now = f"login:{email.strip().lower()}", self.clock()
-        if self.limits.blocked(key, now):
+        key, now = f"login:{_sha(email.strip().lower())}", self.clock()
+        if not self.limits.attempt(key, now):
             raise AuthError("Too many tries. Wait 15 minutes and try again.")
         row = self.db.one("SELECT * FROM users WHERE email = ? AND disabled = 0", (email.strip(),))
         if row is None or not verify_password(password, row["password_hash"]):
-            self.limits.fail(key, now)
             raise AuthError("Wrong email or password.")
-        self.limits.clear(key)
         user = self._user(row)
         token = secrets.token_urlsafe(32)
         ttl = ADMIN_SESSION_TTL if user.role == "admin" else BUSINESS_SESSION_TTL
-        self.db.write("INSERT INTO sessions (token_hash, user_id, csrf, mfa_ok, expires_at) VALUES (?, ?, ?, ?, ?)",
-                      (_sha(token), user.id, secrets.token_urlsafe(24), int(user.role != "admin"), now + ttl))
+        # Re-check the password on insert: a new link or disable landing between the check above and here wins.
+        if not self.db.write("INSERT INTO sessions (token_hash, user_id, csrf, mfa_ok, expires_at)"
+                             " SELECT ?, id, ?, ?, ? FROM users WHERE id = ? AND password_hash = ? AND disabled = 0",
+                             (_sha(token), secrets.token_urlsafe(24), int(user.role != "admin"), now + ttl,
+                              user.id, row["password_hash"])):
+            raise AuthError("Wrong email or password.")
+        self.limits.clear(key)
         return token, user
 
     def session(self, token: str) -> Session | None:
@@ -253,17 +283,20 @@ class Auth:
         if row is None:
             return False
         key, now = f"totp:{row['user_id']}", self.clock()
-        if self.limits.blocked(key, now):
+        if not self.limits.attempt(key, now):
             raise AuthError("Too many wrong codes. Wait 15 minutes and try again.")
         sealed = row["totp_secret"] or row["totp_pending"]
-        if not sealed or not totp_ok(self.vault.open(sealed), code, now):
-            self.limits.fail(key, now)
+        step = totp_step(self.vault.open(sealed), code, now) if sealed else None
+        if step is None:
             return False
-        self.limits.clear(key)
         with self.db.transaction():
+            if not self.db.write("UPDATE users SET totp_step = ? WHERE id = ? AND COALESCE(totp_step, -1) < ?",
+                                 (step, row["user_id"], step)):
+                return False  # a code counts once (RFC 6238 section 5.2)
             if not row["totp_secret"]:
                 self.db.write("UPDATE users SET totp_secret = ? WHERE id = ?", (row["totp_pending"], row["user_id"]))
             self.db.write("UPDATE sessions SET mfa_ok = 1, totp_pending = NULL WHERE token_hash = ?", (_sha(token),))
+        self.limits.clear(key)
         return True
 
     def logout(self, token: str) -> None:
