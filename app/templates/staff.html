@@ -1,0 +1,35 @@
+{% extends "base.html" %}
+{% block content %}
+<h1>Staff &amp; groups</h1>
+<p>Staff can use every tab the bot uses and save rows without a YES. Everyone else is a customer.</p>
+<form method="post">
+  <input type="hidden" name="csrf" value="{{ csrf }}">
+  <label>Staff WhatsApp numbers, one per line, with the country code
+    <textarea name="staff_numbers" rows="4" placeholder="+92 300 1111111">{{ numbers_text }}</textarea>
+  </label>
+  <h2>Groups</h2>
+  {% if not business.number %}
+  <p>Link a group number first; then its groups appear here.</p>
+  {% elif groups_error %}
+  <p class="notice error">{{ groups_error }}</p>
+  {% else %}
+  <input type="hidden" name="groups_listed" value="1">
+  {% if not groups %}<p>The group number isn't in any groups yet.</p>{% endif %}
+  <table>
+    <thead><tr><th>Group</th><th>Staff group</th><th>Gets "needs a person" alerts</th></tr></thead>
+    <tbody>
+      <tr><td><em>No alerts</em></td><td></td>
+        <td><input type="radio" name="alert" value=""{% if not config.staff_alert_chat %} checked{% endif %}></td></tr>
+      {% for g in groups %}
+      <tr>
+        <td>{{ g.name }}</td>
+        <td><input type="checkbox" name="staff_chats" value="{{ g.id }}"{% if g.id in (config.staff_chats or []) %} checked{% endif %}></td>
+        <td><input type="radio" name="alert" value="{{ g.id }}"{% if g.id == config.staff_alert_chat %} checked{% endif %}></td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% endif %}
+  <button type="submit">Save</button>
+</form>
+{% endblock %}

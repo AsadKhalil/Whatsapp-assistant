@@ -11,8 +11,13 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import Response
 
 from app.auth import Session
+from app.config import client_from_dict, digits
 from app.registry import Business
+from app.sheet_rules import sensitive_columns, tab_problems
+from app.sheets import service_account_email, sheet_error
+from app.tools import Caller, lookup_rows
 from app.web import Form, admin_only, business_only, redirect, render, route
+from app.whatsapp import SendError
 
 log = logging.getLogger("pages")
 router = APIRouter()
@@ -126,3 +131,118 @@ def chat_page(request: Request, scope: Scope, form: Form | None) -> Response:
     if not messages:
         raise HTTPException(404, "No such chat.")
     return page(request, scope, "chat.html", title="Chat", chat_id=chat_id, messages=messages)
+
+
+@screen("/staff", ("GET", "POST"))
+def staff_page(request: Request, scope: Scope, form: Form | None) -> Response:
+    business, bot = scope.business, request.app.state.bot
+    config, error = business.config, ""
+    groups, groups_error = [], ""
+    if business.number:
+        try:
+            groups = bot.waha.groups(business.number)
+        except SendError as e:
+            groups_error = f"Couldn't read the group number's groups ({e}). Your saved groups are kept."
+    numbers_text = "\n".join(f"+{n}" for n in config.get("staff_numbers") or [])
+    if form is not None:
+        numbers_text = form.get("staff_numbers")
+        lines = [line.strip() for line in numbers_text.splitlines() if line.strip()]
+        bad = [line for line in lines if not line.startswith("+") or not 10 <= len(digits(line)) <= 15]
+        changes: dict = {"staff_numbers": [digits(line) for line in lines]}
+        if form.has("groups_listed"):  # only when this page showed the groups: WAHA being down keeps the saved ones
+            ids = {group["id"] for group in groups}
+            changes["staff_chats"] = [chat for chat in form.all("staff_chats") if chat in ids]
+            changes["staff_alert_chat"] = form.get("alert") if form.get("alert") in ids else None
+        if bad:
+            error = ("Write each staff number in international format starting with +, like +92 300 1111111: "
+                     + ", ".join(bad))
+        else:
+            try:
+                save(request, scope, changes)
+            except ValueError as e:
+                error = str(e)
+            else:
+                return redirect(f"{scope.base}/staff?ok=saved")
+        config = {**config, **changes}
+    return page(request, scope, "staff.html", title="Staff & groups", config=config, error=error,
+                numbers_text=numbers_text, groups=groups, groups_error=groups_error)
+
+
+def tabs_from_form(form: Form, sheet_tabs: dict[str, list[str]]) -> tuple[dict, list[str]]:
+    """The per-tab permissions ticked on the Sheet screen, and why any can't be saved."""
+    tabs, problems = {}, []
+    for i, (tab, headers) in enumerate(sheet_tabs.items()):
+        if not form.has(f"use{i}"):
+            continue  # the bot doesn't use this tab at all
+        customer = [access for access in ("read", "own", "append") if form.has(f"{access}{i}")]
+        rule: dict = {"customer": customer}
+        if "own" in customer:
+            rule["owner_column"] = form.get(f"owner{i}")
+        if "append" in customer:
+            rule["fill"] = {form.get(f"fill_{source}{i}"): source for source in ("name", "phone")
+                            if form.get(f"fill_{source}{i}")}
+        problems += tab_problems(tab, rule, headers, confirmed=form.has(f"confirm{i}"))
+        tabs[tab] = rule
+    return tabs, problems
+
+
+def customer_preview(sheets, business_id: str, config: dict, tab: str) -> dict:
+    """What a sample customer would get from the bot's lookup on this tab, with the unsaved permissions."""
+    try:
+        client = client_from_dict(business_id, config)
+    except ValueError as e:
+        return {"tab": tab, "error": str(e), "rows": [], "phone": None}
+    rule, phone = client.tabs.get(tab), None
+    try:
+        if rule and "own" in rule.customer:  # the customer whose number is in the first data row
+            rows = sheets.rows(client.sheet_id, tab)
+            first = next((r for r in rows if str(r.get(rule.owner_column, "")).strip()), None)
+            phone = digits(str(first[rule.owner_column])) if first else None
+        result = lookup_rows(sheets, client, Caller("customer", False, "Sample customer", phone), tab, "")
+    except Exception:
+        log.exception("preview_failed business=%s", business_id)
+        return {"tab": tab, "error": "The tab couldn't be read right now.", "rows": [], "phone": phone}
+    return {"tab": tab, "error": result.get("error", ""), "rows": result.get("rows", [])[:5], "phone": phone}
+
+
+@screen("/sheet", ("GET", "POST"))
+def sheet_page(request: Request, scope: Scope, form: Form | None) -> Response:
+    state, business = request.app.state, scope.business
+    config, error, preview = dict(business.config), "", None
+    email = service_account_email(state.settings.google_service_account_file)
+    action = form.get("action") if form is not None else ""
+    if action == "sheet_id":
+        if not scope.is_admin:
+            raise HTTPException(403, "Only admins can change which Sheet a business uses.")
+        try:
+            save(request, scope, {"sheet_id": form.get("sheet_id")})
+        except ValueError as e:
+            error = str(e)
+        else:
+            return redirect(f"{scope.base}/sheet?ok=saved")
+    sheet_tabs, sheet_problem = {}, ""
+    try:
+        sheet_tabs = state.bot.sheets.tab_headers(config["sheet_id"])
+    except Exception as e:
+        sheet_problem = sheet_error(e, email)
+    if form is not None and action != "sheet_id":
+        if sheet_problem or not form.has("tabs_listed"):  # never save a form that didn't list the Sheet's tabs
+            error = sheet_problem or "Reload the page and try again."
+        else:
+            tabs, problems = tabs_from_form(form, sheet_tabs)
+            config.update(tabs=tabs, knowledge_tab=form.get("knowledge_tab") or "Knowledge",
+                          handoff_tab=form.get("handoff_tab") or "Handoffs")
+            if problems:
+                error = " ".join(problems)
+            elif action.startswith("preview:"):
+                preview = customer_preview(state.bot.sheets, business.id, config, action.removeprefix("preview:"))
+            else:
+                try:
+                    save(request, scope, {key: config[key] for key in ("tabs", "knowledge_tab", "handoff_tab")})
+                except ValueError as e:
+                    error = str(e)
+                else:
+                    return redirect(f"{scope.base}/sheet?ok=saved")
+    return page(request, scope, "sheet.html", title="Sheet & permissions", config=config, email=email,
+                sheet_tabs=sheet_tabs, sheet_problem=sheet_problem, error=error, preview=preview,
+                sensitive={tab: sensitive_columns(headers) for tab, headers in sheet_tabs.items()})
