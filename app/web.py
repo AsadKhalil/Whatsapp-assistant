@@ -3,11 +3,15 @@ from __future__ import annotations
 
 import hashlib
 import hmac
+import io
 import logging
 from datetime import datetime
 from pathlib import Path
 from urllib.parse import parse_qs
 from zoneinfo import ZoneInfo
+
+import qrcode
+from qrcode.image.svg import SvgPathImage
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import HTMLResponse, RedirectResponse, Response
@@ -167,10 +171,18 @@ def _email_hash(email: str) -> str:
     return hashlib.sha256(email.strip().lower().encode()).hexdigest()[:12]
 
 
+def _totp_qr(uri: str) -> Markup:
+    """The setup key as an inline SVG; CSS sizes it and colors the modules."""
+    buf = io.BytesIO()
+    qrcode.make(uri, image_factory=SvgPathImage, box_size=10).save(buf)
+    return Markup(buf.getvalue().decode())
+
+
 def _totp_page(request: Request, sess: Session, error: str = "") -> HTMLResponse:
     secret = "" if sess.user.has_totp else request.app.state.auth.totp_setup_secret(request.cookies[COOKIE])
+    uri = totp_uri(secret, sess.user.email) if secret else ""
     return render(request, "totp.html", sess, title="Two-step login", secret=secret, error=error,
-                  uri=totp_uri(secret, sess.user.email) if secret else "")
+                  uri=uri, qr_svg=_totp_qr(uri) if uri else "")
 
 
 @router.get("/")

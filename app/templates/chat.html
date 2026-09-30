@@ -2,11 +2,15 @@
 {% block content %}
 <p><a href="{{ base }}/chats">← All chats</a></p>
 <h1>Chat</h1>
-{% for m in messages %}
-<article>
-  <header><strong>{{ m.sender_name or ('Bot' if m.from_bot else 'Customer') }}</strong>
-    <small>{{ m.created_at|localtime(business.config.timezone) }}</small></header>
-  <p>{{ m.text or '(voice note or media)' }}</p>
-</article>
-{% endfor %}
+<div class="chat">
+  {% for m in messages %}
+  <div class="msg {{ 'bot' if m.from_bot else 'customer' }}">
+    <div class="msg-head">
+      <strong>{{ m.sender_name or ('Bot' if m.from_bot else 'Customer') }}</strong>
+      <small>{{ m.created_at|localtime(business.config.timezone) }}</small>
+    </div>
+    <p>{{ m.text or '(voice note or media)' }}</p>
+  </div>
+  {% endfor %}
+</div>
 {% endblock %}

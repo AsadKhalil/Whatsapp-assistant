@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="en">
+<html lang="en" data-theme="light">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -9,31 +9,30 @@
   <link rel="stylesheet" href="/static/app.css">
 </head>
 <body>
-<header class="container">
-  <nav>
-    <ul><li><strong>WhatsApp Assistant</strong></li></ul>
+<header class="topbar">
+  <div class="container topbar-in">
+    <a class="brand" href="/"><span class="brand-dot" aria-hidden="true"></span>WhatsApp&hairsp;<strong>Assistant</strong></a>
     {% if user %}
-    <ul>
+    <nav class="topbar-nav" aria-label="Dashboard">
       {% if user.role == "admin" %}
-      <li><a href="/admin">Businesses</a></li>
-      <li><a href="/admin/numbers">Numbers</a></li>
-      <li><a href="/admin/admins">Admins</a></li>
+      <a href="/admin">Businesses</a>
+      <a href="/admin/numbers">Numbers</a>
+      <a href="/admin/admins">Admins</a>
       {% endif %}
-      <li>
-        <form method="post" action="/logout" class="inline">
-          <input type="hidden" name="csrf" value="{{ csrf }}">
-          <button type="submit" class="secondary outline">Log out</button>
-        </form>
-      </li>
-    </ul>
+      <form method="post" action="/logout" class="inline">
+        <input type="hidden" name="csrf" value="{{ csrf }}">
+        <button type="submit" class="btn ghost">Log out</button>
+      </form>
+    </nav>
     {% endif %}
-  </nav>
+  </div>
 </header>
 <main class="container">
   {% if business_nav %}{% include "_business_nav.html" %}{% endif %}
-  {% if ok %}<p class="notice ok">{{ ok }}</p>{% endif %}
   {% if error %}<p class="notice error">{{ error }}</p>{% endif %}
   {% block content %}{% endblock %}
 </main>
+<div id="toasts" role="status" aria-live="polite"{% if ok %} data-ok="{{ ok }}"{% endif %}></div>
+<script src="/static/app.js" defer></script>
 </body>
 </html>

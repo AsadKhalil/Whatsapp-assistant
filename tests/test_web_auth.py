@@ -57,6 +57,7 @@ def test_admins_set_up_and_pass_two_step_login():
     page = http.get("/login/totp").text
     secret = re.search(r'id="totp-secret">([A-Z2-7]+)<', page).group(1)
     assert "otpauth://totp/" in page
+    assert "<svg" in page and "qr-card" in page  # the setup key is offered as a scannable QR code
     token = csrf(http, "/login/totp")
     assert "didn't match" in http.post("/login/totp", data={"csrf": token, "code": "000000"}).text
     r = http.post("/login/totp", data={"csrf": token, "code": totp(secret, NOW)}, follow_redirects=False)

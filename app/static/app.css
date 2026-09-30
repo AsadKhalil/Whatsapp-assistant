@@ -1,11 +1,232 @@
-/* A few additions to Pico.css */
-.notice { padding: 0.75rem 1rem; border-radius: 0.5rem; }
-.notice.ok { background: #e7f6ec; color: #1b5e20; }
-.notice.error { background: #fdecea; color: #b71c1c; }
+/* WhatsApp Assistant dashboard.
+   A quiet light theme: green-tinted neutrals, one green accent, soft cards.
+   Sits on top of Pico v2 and drives it through its own variables. */
+
+/* Pico v2 scopes its light theme to :root:not([data-theme=dark]); match that selector so these win. */
+:root:not([data-theme=dark]) {
+  /* ink and paper, tinted toward the green hue instead of pure gray */
+  --ink: oklch(26% 0.015 155);
+  --ink-soft: oklch(38% 0.014 155);
+  --muted: oklch(50% 0.016 155);
+  --paper: oklch(97.4% 0.007 155);
+  --surface: oklch(99.2% 0.005 155);
+  --surface-2: oklch(96.2% 0.01 155);
+  --line: oklch(89% 0.011 155);
+  --line-soft: oklch(93% 0.008 155);
+  --accent: oklch(55% 0.125 152);
+  --accent-hover: oklch(50.5% 0.125 152);
+  --accent-soft: oklch(94.2% 0.052 152);
+  --accent-line: oklch(85.5% 0.07 152);
+  --ok-ink: oklch(42% 0.11 152);
+  --danger: oklch(51% 0.17 27);
+  --danger-hover: oklch(46% 0.17 27);
+  --danger-soft: oklch(96% 0.028 27);
+  --danger-line: oklch(88% 0.06 27);
+  --shadow-sm: 0 1px 2px oklch(26% 0.015 155 / 0.07);
+  --shadow-md: 0 1px 2px oklch(26% 0.015 155 / 0.06), 0 8px 24px oklch(26% 0.015 155 / 0.07);
+  --radius: 14px;
+  --radius-sm: 10px;
+  --ease-out: cubic-bezier(0.22, 1, 0.36, 1);
+
+  /* Pico re-tuned */
+  --pico-background-color: var(--paper);
+  --pico-color: var(--ink);
+  --pico-muted-color: var(--muted);
+  --pico-h1-color: var(--ink);
+  --pico-h2-color: var(--ink);
+  --pico-h3-color: var(--ink);
+  --pico-primary: var(--accent);
+  --pico-primary-background: var(--accent);
+  --pico-primary-hover: var(--accent-hover);
+  --pico-primary-hover-background: var(--accent-hover);
+  --pico-primary-focus: oklch(55% 0.125 152 / 0.35);
+  --pico-primary-inverse: oklch(99.2% 0.005 152);
+  --pico-border-radius: var(--radius-sm);
+  --pico-border-width: 1px;
+  --pico-form-element-background-color: var(--surface);
+  --pico-form-element-border-color: var(--line);
+  --pico-form-element-color: var(--ink);
+  --pico-form-element-placeholder-color: var(--muted);
+  --pico-form-element-active-border-color: var(--accent);
+  --pico-form-element-focus-color: var(--accent);
+  --pico-card-background-color: var(--surface);
+  --pico-card-border-color: var(--line-soft);
+  --pico-card-box-shadow: var(--shadow-sm);
+  --pico-table-border-color: var(--line-soft);
+  --pico-typography-spacing-vertical: 1.1rem;
+}
+
+html { font-variant-numeric: tabular-nums; }
+body { min-height: 100vh; }
+
+h1 { font-size: 1.55rem; letter-spacing: -0.01em; margin-bottom: 0.4em; }
+h2 { font-size: 1.15rem; margin-top: 2rem; }
+h3 { font-size: 1rem; }
+a { text-decoration: none; }
+a:hover { text-decoration: underline; }
+code { background: var(--surface-2); border-radius: 6px; padding: 0.1em 0.4em; font-size: 0.9em; }
+small, .muted { color: var(--muted); }
+
+/* Top bar */
+.topbar {
+  position: sticky; top: 0; z-index: 40;
+  background: oklch(99.2% 0.005 155 / 0.92);
+  backdrop-filter: blur(8px);
+  border-bottom: 1px solid var(--line-soft);
+}
+.topbar-in {
+  display: flex; align-items: center; justify-content: space-between;
+  gap: 1rem; padding-top: 0.55rem; padding-bottom: 0.55rem;
+}
+.brand {
+  display: inline-flex; align-items: center; gap: 0.5rem;
+  font-size: 1.02rem; color: var(--ink-soft); text-decoration: none;
+}
+.brand:hover { text-decoration: none; }
+.brand strong { color: var(--ink); font-weight: 650; }
+.brand-dot {
+  width: 0.72rem; height: 0.72rem; border-radius: 999px;
+  background: var(--accent); box-shadow: 0 0 0 4px var(--accent-soft);
+}
+.topbar-nav { display: flex; align-items: center; gap: 0.35rem; margin: 0; }
+.topbar-nav a {
+  color: var(--muted); font-weight: 550; font-size: 0.93rem;
+  padding: 0.4rem 0.7rem; border-radius: 999px;
+}
+.topbar-nav a:hover { color: var(--ink); background: var(--surface-2); text-decoration: none; }
+.topbar-nav a[aria-current="page"] { color: var(--ok-ink); background: var(--accent-soft); }
+
+/* Business tab nav */
+nav.tabs {
+  display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between;
+  gap: 0.5rem 1rem; margin: 0 0 1.25rem; padding: 0.5rem 0.75rem;
+  background: var(--surface); border: 1px solid var(--line-soft);
+  border-radius: var(--radius); box-shadow: var(--shadow-sm);
+}
+nav.tabs ul { margin: 0; padding: 0; display: flex; flex-wrap: wrap; align-items: center; gap: 0.25rem; }
+nav.tabs li { margin: 0; }
+nav.tabs a {
+  display: inline-block; padding: 0.35rem 0.75rem; border-radius: 999px;
+  font-size: 0.93rem; font-weight: 550; color: var(--muted);
+}
+nav.tabs a:hover { color: var(--ink); background: var(--surface-2); text-decoration: none; }
+nav.tabs a[aria-current="page"] { color: var(--ok-ink); background: var(--accent-soft); }
+
+/* Cards */
+main > article, article {
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-sm);
+}
+article > header { background: none; padding: 0; }
+
+/* Tables */
+table { display: block; overflow-x: auto; border-collapse: collapse; }
+thead th {
+  font-size: 0.74rem; letter-spacing: 0.06em; text-transform: uppercase;
+  color: var(--muted); font-weight: 600; white-space: nowrap;
+}
+td, th { border-bottom: 1px solid var(--line-soft); }
+tbody tr:hover td { background: oklch(97.4% 0.007 155 / 0.7); }
+
+/* Badges: quiet pills */
+.badge {
+  display: inline-flex; align-items: center; gap: 0.4em;
+  padding: 0.14rem 0.6rem 0.14rem 0.5rem; border-radius: 999px;
+  font-size: 0.8em; font-weight: 600; letter-spacing: 0.01em;
+  background: var(--surface-2); color: var(--ink-soft); border: 1px solid var(--line-soft);
+}
+.badge::before { content: ""; width: 0.42em; height: 0.42em; border-radius: 999px; background: var(--muted); }
+.badge.good { background: var(--accent-soft); color: var(--ok-ink); border-color: var(--accent-line); }
+.badge.good::before { background: var(--accent); }
+.badge.bad { background: var(--danger-soft); color: var(--danger); border-color: var(--danger-line); }
+.badge.bad::before { background: var(--danger); }
+
+/* Inline notices: full border and a tinted wash, so they read as one block */
+.notice {
+  padding: 0.7rem 1rem; border-radius: var(--radius-sm); font-size: 0.95rem;
+  border: 1px solid var(--line);
+  background: var(--surface-2); color: var(--ink-soft);
+}
+.notice.ok { background: var(--accent-soft); border-color: var(--accent-line); color: var(--ok-ink); }
+.notice.error { background: var(--danger-soft); border-color: var(--danger-line); color: var(--danger); }
+
+/* Buttons */
+.btn.ghost, form.inline button.secondary.outline, form.inline button.secondary {
+  background: none; border: 1px solid transparent; color: var(--muted);
+  padding: 0.4rem 0.75rem; font-weight: 550; font-size: 0.93rem;
+  width: auto; margin: 0;
+}
+.btn.ghost:hover, form.inline button.secondary:hover {
+  color: var(--ink); background: var(--surface-2); border-color: transparent;
+}
 form.inline { display: inline; margin: 0; }
-form.inline button { width: auto; margin: 0 0.25rem 0 0; padding: 0.25rem 0.75rem; }
-.badge { padding: 0.1rem 0.5rem; border-radius: 1rem; font-size: 0.85em; background: #eceff1; color: #263238; }
-.badge.good { background: #e7f6ec; color: #1b5e20; }
-.badge.bad { background: #fdecea; color: #b71c1c; }
-img.qr { max-width: 280px; background: #fff; padding: 0.5rem; }
-nav.tabs { flex-wrap: wrap; }
+form.inline button { width: auto; margin: 0; padding: 0.35rem 0.8rem; font-size: 0.88rem; }
+button.secondary {
+  background: var(--surface); border-color: var(--line); color: var(--ink-soft);
+}
+button.secondary:hover { background: var(--surface-2); border-color: var(--line); color: var(--ink); }
+
+.copy-btn {
+  display: inline-block; width: auto; margin: 0 0 0 0.35rem; padding: 0.12rem 0.55rem;
+  font-size: 0.8rem; font-weight: 600; border-radius: 999px;
+  background: var(--surface-2); border: 1px solid var(--line-soft); color: var(--ink-soft);
+}
+.copy-btn:hover { background: var(--accent-soft); border-color: var(--accent-line); color: var(--ok-ink); }
+
+/* Sign-in pages: one calm card in the middle */
+.auth-card {
+  max-width: 26rem; margin: 6vh auto 0; padding: 1.6rem 1.6rem 1.4rem;
+}
+.auth-card h1 { text-align: center; margin-bottom: 1rem; }
+
+/* QR codes (the two-step setup SVG and the WAHA linking image) */
+.qr-card {
+  width: 15rem; margin: 0.4rem auto 0.8rem; padding: 0.75rem;
+  background: var(--surface); border: 1px solid var(--line-soft);
+  border-radius: var(--radius); box-shadow: var(--shadow-sm);
+}
+.qr-card svg { width: 100%; height: auto; display: block; }
+.qr-card svg path { fill: var(--ink); }
+img.qr {
+  display: block; width: 15rem; max-width: 100%; padding: 0.75rem; margin: 0.4rem auto 0.8rem;
+  background: var(--surface); border: 1px solid var(--line-soft);
+  border-radius: var(--radius); box-shadow: var(--shadow-sm);
+}
+
+/* Chat transcript: bubbles, customer on the right */
+.chat { display: flex; flex-direction: column; gap: 0.6rem; margin-top: 1rem; }
+.msg { max-width: min(76%, 34rem); border-radius: var(--radius); padding: 0.55rem 0.9rem; }
+.msg .msg-head { display: flex; gap: 0.6rem; align-items: baseline; margin-bottom: 0.15rem; }
+.msg .msg-head small { font-size: 0.75rem; }
+.msg p { margin: 0; }
+.msg.bot { align-self: flex-start; background: var(--surface); border: 1px solid var(--line-soft); }
+.msg.customer { align-self: flex-end; background: var(--accent-soft); border: 1px solid var(--accent-line); }
+
+/* Toasts: brief confirmations, bottom right, click to dismiss */
+#toasts {
+  position: fixed; right: 1.25rem; bottom: 1.25rem; z-index: 100;
+  display: flex; flex-direction: column; gap: 0.5rem; max-width: min(22rem, calc(100vw - 2.5rem));
+}
+.toast {
+  display: flex; align-items: center; gap: 0.6rem;
+  padding: 0.7rem 1rem; border-radius: var(--radius-sm);
+  background: var(--surface); border: 1px solid var(--line);
+  box-shadow: var(--shadow-md); color: var(--ink); font-size: 0.93rem; cursor: pointer;
+  opacity: 0; transform: translateY(10px);
+  transition: opacity 0.25s var(--ease-out), transform 0.25s var(--ease-out);
+}
+.toast.in { opacity: 1; transform: none; }
+.toast .dot { width: 0.55rem; height: 0.55rem; border-radius: 999px; flex: none; }
+.toast.ok .dot { background: var(--accent); }
+.toast.error .dot { background: var(--danger); }
+
+/* Forms */
+label { font-weight: 550; }
+label small { display: block; font-weight: 400; }
+input, select, textarea { box-shadow: none; }
+
+/* Focus and motion */
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+@media (prefers-reduced-motion: reduce) {
+  .toast { transition: none; }
+}

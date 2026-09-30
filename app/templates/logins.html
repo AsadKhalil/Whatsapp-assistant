@@ -2,7 +2,9 @@
 {% block content %}
 <h1>{{ title }}</h1>
 {% if link %}
-<p class="notice ok">Send this one-time link to {{ link_email }} (for example on WhatsApp). It works for 7 days:<br><code>{{ link }}</code></p>
+<p class="notice ok">Send this one-time link to {{ link_email }} (for example on WhatsApp). It works for 7 days:
+  <br><code>{{ link }}</code>
+  <button type="button" class="copy-btn" data-copy="{{ link }}">Copy link</button></p>
 {% endif %}
 <table>
   <thead><tr><th>Email</th><th>Name</th><th>Status</th><th></th></tr></thead>
