@@ -34,7 +34,7 @@ the SQLite connection live in one process.
 3. Locked out? `docker compose exec engine python -m app.cli admin-link you@example.com` prints a fresh link (it resets the password and the two-step login).
 4. Each business has its own Meta webhook address, `https://$DOMAIN/webhooks/meta/<business-id>`, shown with its verify token on the business's *Official number* page.
 
-Upgrading from `clients.yaml`: the first start with an empty dashboard database imports `clients.yaml` and the `.env` Meta keys once. After that the dashboard is the source of truth and `clients.yaml` is ignored. The old address `https://$DOMAIN/webhooks/meta` keeps working for businesses on the `.env` Meta app.
+Upgrading from `clients.yaml`: add `SECRET_KEY`, then `git pull`, `docker compose up -d --build` and `docker compose restart caddy` (Caddy only reads the `Caddyfile`, which now opens the dashboard's paths, when it starts). The first start with an empty dashboard database imports `clients.yaml` and the `.env` Meta keys once. After that the dashboard is the source of truth and `clients.yaml` is ignored. The old address `https://$DOMAIN/webhooks/meta` keeps working for businesses on the `.env` Meta app.
 
 ## One-time setup for a pilot client
 
