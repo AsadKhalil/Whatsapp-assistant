@@ -164,6 +164,7 @@ def test_email_settings_are_sealed_audited_without_the_password_and_reach_the_cl
     ("not-an-email", "abcdefghijklmnop", "Gmail address"),
     ("a@gmail.com, b@gmail.com", "abcdefghijklmnop", "Gmail address"),
     ("shop@gmail.com", "hunter2hunter2", "16 letters"),
+    ("shop@gmail.com", "abcdefghijklmno\u00e4", "16 letters"),  # not an ASCII letter
     ("shop@gmail.com", "", "app password too"),
 ])
 def test_bad_email_settings_are_refused(address, password, message):

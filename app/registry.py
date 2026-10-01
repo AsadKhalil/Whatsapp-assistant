@@ -234,7 +234,7 @@ class Registry:
         app_password = "".join((app_password or "").split())
         if not is_email(address):
             raise ValueError("Enter one Gmail address, like sweetbakes@gmail.com.")
-        if app_password and not (len(app_password) == 16 and app_password.isalpha()):
+        if app_password and not re.fullmatch(r"[A-Za-z]{16}", app_password):
             raise ValueError("The app password is the 16 letters Google shows (spaces don't matter), "
                              "not your normal Gmail password.")
         if self.business(business_id) is None:

@@ -56,6 +56,7 @@ def test_sends_one_plain_text_email_over_verified_starttls():
     (smtplib.SMTPRecipientsRefused({"acc@example.com": (550, b"no such user")}), "send", "recipient",
      "refused the address acc@example.com"),
     (TimeoutError("slow"), "login", "network", "couldn't be reached"),
+    (UnicodeEncodeError("ascii", "\u00e4", 0, 1, "not ascii"), "login", "auth", "app password"),
     (smtplib.SMTPServerDisconnected("bye"), "send", "network", "couldn't be reached"),
 ])
 def test_gmail_errors_become_one_readable_reason(error, at, kind, reason):
@@ -76,6 +77,8 @@ def test_a_line_break_in_the_subject_is_refused_not_sent():
     ("acc@example.com", True), ("first.last@mail.example.co.uk", True),
     ("acc@example", False), ("not an address", False), ("a@example.com, b@example.com", False),
     ("a@example.com;b@example.com", False), ("<a@example.com>", False), ("x" * 250 + "@example.com", False),
+    ("x:bob@evil.com", False), ("bob@ex\u0430mple.com", False), ("bob@x..com", False),
+    ("a(b@c.de", False), ("bob@example.com\u202e", False),
 ])
 def test_is_email_accepts_exactly_one_plain_address(text, ok):
     assert is_email(text) is ok

@@ -281,7 +281,7 @@ ol.steps.from-7 { counter-reset: step 6; }
 
 /* Skip link: hidden until a keyboard user tabs to it */
 .skip-link {
-  position: absolute; left: -999px; top: 0.5rem; z-index: 20;
+  position: absolute; left: -999px; top: 0.5rem; z-index: 50;  /* above the sticky .topbar (40) */
   padding: 0.45rem 0.9rem; border-radius: 0.5rem; background: var(--surface); color: var(--ink);
 }
 .skip-link:focus { left: 0.5rem; }

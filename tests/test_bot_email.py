@@ -4,6 +4,7 @@ from dataclasses import replace
 import pytest
 
 from app.bot import EMAIL_DAILY_LIMIT
+from app.llm import ModelReply
 from app.mailer import MailError
 from tests.fakes import call, incoming, make_bot, say, texts
 
@@ -112,3 +113,47 @@ def test_logs_never_hold_the_email(caplog):
     assert "email_sent client=acme" in caplog.text
     for secret in ("acc@example.com", "September", "27,300", "abcdefghijklmnop", "shop@gmail.com"):
         assert secret not in caplog.text
+
+
+def together(*replies: ModelReply) -> ModelReply:
+    """One model reply that calls several tools at once."""
+    return ModelReply(text="", tool_calls=[c for r in replies for c in r.tool_calls],
+                      message={"role": "assistant", "content": None,
+                               "tool_calls": [c for r in replies for c in r.message["tool_calls"]]})
+
+
+SAVE = call("propose_row", tab="Expenses", values=[{"column": "Item", "value": "Petrol"},
+                                                   {"column": "Amount", "value": "1500"}])
+
+
+def test_the_preview_is_sent_whole_and_an_email_too_long_to_show_is_refused():
+    bot, _ = email_bot(call("send_email", **{**EMAIL, "body": "x" * 3400}))
+    bot.handle(incoming("email it", phone=STAFF))
+    assert texts(bot.meta)[-1].endswith("Reply YES to send or NO to cancel.")
+    huge = {"to": "a" * 240 + "@example.com", "subject": "s" * 200, "body": "x" * 3500}
+    big, llm = email_bot(call("send_email", **huge), say("Let me make it shorter."))
+    big.handle(incoming("email it", phone=STAFF))
+    assert "too long" in llm.calls[1][-1]["content"]
+    assert big.store.get_pending_email("acme", f"user-{STAFF}", f"user-{STAFF}", NOW) is None
+
+
+def test_a_staff_turn_with_an_email_and_a_save_does_both():
+    bot, _ = email_bot(together(call("send_email", **EMAIL), SAVE))
+    bot.handle(incoming("log petrol and email the accountant", phone=STAFF))
+    assert [tab for tab, _ in bot.sheets.appended] == ["Expenses"]
+    sent = texts(bot.meta)
+    assert sent[-2].endswith("Reply YES to send or NO to cancel.") and "Saved to Expenses" in sent[-1]
+
+
+def test_a_refused_email_beside_a_save_is_reported_not_dropped():
+    bot, _ = email_bot(together(SAVE, call("send_email", **{**EMAIL, "to": "not an address"})))
+    bot.handle(incoming("log petrol and email the accountant", phone=STAFF))
+    reply = texts(bot.meta)[-1]
+    assert "Saved to Expenses" in reply and "Email not prepared" in reply and "one email address" in reply
+
+
+def test_only_one_email_is_prepared_per_turn():
+    bot, _ = email_bot(together(call("send_email", **EMAIL), call("send_email", **{**EMAIL, "to": "boss@example.com"})))
+    bot.handle(incoming("email both of them", phone=STAFF))
+    assert bot.store.get_pending_email("acme", f"user-{STAFF}", f"user-{STAFF}", NOW)["to"] == "acc@example.com"
+    assert any("one email at a time" in text for text in texts(bot.meta))

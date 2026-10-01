@@ -133,7 +133,8 @@ class Bot:
         if m.kind == "unsupported":
             self._send(client, m, UNSUPPORTED)
             return
-        self._send(client, m, self._think(client, m, self._caller(client, m), now))
+        for text in self._think(client, m, self._caller(client, m), now):
+            self._send(client, m, text)
 
     def _reply_allowed(self, client: Client, m: Incoming, now: float) -> bool:
         """The loop breaker: at most BURST_LIMIT replies per chat per BURST_WINDOW, and a daily cost ceiling."""
@@ -219,8 +220,11 @@ class Bot:
         result = email_request(args)
         if "error" in result:
             return result
+        preview = email_preview(result["email"])
+        if len(intro(client, m.is_group)) + 2 + len(preview) > MAX_TEXT:  # it must reach WhatsApp whole
+            return {"error": "That email is too long to show in one WhatsApp message. Make it shorter."}
         self.store.put_pending_email(client.id, m.chat_id, m.sender_id, result["email"], now + PENDING_TTL)
-        return Final(email_preview(result["email"]))
+        return Final(preview)
 
     def _addressed(self, m: Incoming) -> bool:
         if not m.is_group:
@@ -228,7 +232,8 @@ class Bot:
         return m.mentions_bot or (m.reply_to is not None
                                   and self.store.is_bot_message(m.client_id, m.channel, m.reply_to))
 
-    def _think(self, client: Client, m: Incoming, caller: Caller, now: float) -> str:
+    def _think(self, client: Client, m: Incoming, caller: Caller, now: float) -> list[str]:
+        """The replies to send, in order: usually one. An email preview always goes whole, as its own message."""
         messages = [{"role": "system", "content": self._system_prompt(client, m, caller, now)},
                     *self._history(client, m)]
         tools = self._tools(client, caller)
@@ -238,31 +243,41 @@ class Bot:
             except Exception:
                 log.exception("model_failed client=%s", client.id)
                 self._handoff(client, m, "The assistant had an error.", now)
-                return FALLBACK
+                return [FALLBACK]
             if not reply.tool_calls:
                 if reply.text:
-                    return reply.text
+                    return [reply.text]
                 self._handoff(client, m, "The assistant gave an empty answer.", now)
-                return FALLBACK
+                return [FALLBACK]
             messages.append(reply.message)
-            finals, results = [], []
+            finals, results, preview = [], [], None
             for tool_call in reply.tool_calls:
-                result = self._run_tool(client, m, caller, tool_call.name, tool_call.arguments, now)
+                if tool_call.name == "send_email" and preview is not None:
+                    result = {"error": "Only one email at a time: ask for the next one after this one is answered."}
+                else:
+                    result = self._run_tool(client, m, caller, tool_call.name, tool_call.arguments, now)
                 if isinstance(result, Final):
-                    finals.append(result.text)
-                    if caller.role != "staff" or tool_call.name == "send_email":
-                        break  # one proposal per customer turn, one email preview per turn
+                    if tool_call.name == "send_email":
+                        preview = result.text
+                    else:
+                        finals.append(result.text)
+                    if caller.role != "staff":
+                        break  # one proposal per customer turn: a second would replace the pending one
                 else:
                     results.append((tool_call, result))
-            if finals:  # a code-composed reply ends the turn; failed staff saves are listed, never dropped
-                failed = [r["error"] for c, r in results if c.name == "propose_row" and "error" in r]
-                return "\n\n".join(finals + [f"⚠️ Not saved: {error}" for error in failed])
+            if finals or preview is not None:  # code-composed replies end the turn; failures are listed, not dropped
+                notes = [f"⚠️ Not saved: {r['error']}" for c, r in results if c.name == "propose_row" and "error" in r]
+                notes += [f"⚠️ Email not prepared: {r['error']}" for c, r in results
+                          if c.name == "send_email" and "error" in r]
+                # The preview goes first: if the loop breaker stops a second message, it is never the preview.
+                replies = [preview] if preview is not None else []
+                return replies + (["\n\n".join(finals + notes)] if finals or notes else [])
             for tool_call, result in results:
                 messages.append({"role": "tool", "tool_call_id": tool_call.id,
                                  "content": json.dumps(result, ensure_ascii=False, default=str)})
         log.warning("model_budget_exhausted client=%s", client.id)
         self._handoff(client, m, "The assistant ran out of steps.", now)
-        return FALLBACK
+        return [FALLBACK]
 
     def _run_tool(self, client: Client, m: Incoming, caller: Caller, name: str, args: dict,
                   now: float) -> dict | Final:

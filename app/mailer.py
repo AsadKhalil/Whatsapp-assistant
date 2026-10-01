@@ -8,11 +8,13 @@ from email.message import EmailMessage
 from email.utils import formataddr
 
 GMAIL_HOST, GMAIL_PORT = "smtp.gmail.com", 587
-_EMAIL = re.compile(r"[^@\s,;<>\"']+@[^@\s,;<>\"']+\.[^@\s,;<>\"']+")
+# ASCII only: a look-alike letter (say, a Cyrillic one that looks like "a") or a hidden control character could
+# make an address read one way in the preview and deliver another way.
+_EMAIL = re.compile(r"[A-Za-z0-9._%+-]+@[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)+")
 
 
 def is_email(text: str) -> bool:
-    """Exactly one plain address like name@example.com: no lists, display names or spaces."""
+    """Exactly one plain ASCII address like name@example.com: no lists, display names, spaces or look-alikes."""
     return len(text) <= 254 and _EMAIL.fullmatch(text) is not None
 
 
@@ -43,7 +45,7 @@ class Mailer:
                 smtp.starttls(context=ssl.create_default_context())  # checks Gmail's certificate
                 smtp.login(address, "".join(app_password.split()))
                 smtp.send_message(message)
-        except smtplib.SMTPAuthenticationError:
+        except (smtplib.SMTPAuthenticationError, UnicodeError):  # Gmail logins are ASCII only
             raise MailError("Gmail refused the email address or app password (check the business's Email page)",
                             "auth") from None
         except smtplib.SMTPRecipientsRefused:

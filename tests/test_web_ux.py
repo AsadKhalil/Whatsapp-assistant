@@ -1,3 +1,4 @@
+import re
 from pathlib import Path
 
 from tests.webkit import Site, csrf
@@ -70,3 +71,12 @@ def test_sheet_preview_returns_to_its_tab_and_problems_show_at_the_tab():
                                       f"use{i}": "on", f"own{i}": "on", f"owner{i}": ""})
     card = r.text.split(f'id="tab-{i}"', 1)[1].split("</article>", 1)[0]
     assert 'class="field-error"' in card and "pick which column holds" in card
+
+
+def test_the_skip_link_shows_above_the_sticky_top_bar():
+    css = Path("app/static/app.css").read_text(encoding="utf-8")
+
+    def z_index(selector: str) -> int:
+        return int(re.search(re.escape(selector) + r" \{[^}]*z-index: (\d+)", css).group(1))
+
+    assert z_index(".skip-link") > z_index(".topbar")
