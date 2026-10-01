@@ -51,10 +51,12 @@
   <input type="hidden" name="csrf" value="{{ csrf }}">
   <div class="grid">
     <label>Session name
-      <input name="session" placeholder="e.g. sweetbakes-1" aria-label="Session name" value="{{ session }}" required></label>
-    <label>Notes (carrier, SIM cost, renewal date)
-      <input name="notes" placeholder="e.g. Jazz SIM, bought 2026-10" aria-label="Notes" value="{{ notes }}"></label>
+      <input name="session" placeholder="e.g. sweetbakes-1" value="{{ session }}" required
+             aria-describedby="session-help"></label>
+    <label>Notes <small>(optional: carrier, SIM cost, renewal date)</small>
+      <input name="notes" placeholder="e.g. Jazz SIM, bought 2026-10" value="{{ notes }}"></label>
   </div>
+  <small id="session-help">3–32 lowercase letters, digits or dashes.</small>
   <button type="submit">Add and show the QR code</button>
 </form>
 {% endblock %}

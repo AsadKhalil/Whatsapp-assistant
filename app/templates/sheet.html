@@ -1,11 +1,13 @@
 {% extends "base.html" %}
 {% block content %}
 <h1>Sheet &amp; permissions</h1>
-<p>Share the Google Sheet with <strong>{{ email or "the service account (ask your admin for the address)" }}</strong> as <em>Editor</em>.</p>
+<p>Share the Google Sheet, as <em>Editor</em>, with:</p>
+<div class="share-row"><code>{{ email or "the service account (ask your admin for the address)" }}</code>
+  {% if email %}<button type="button" class="copy-btn" data-copy="{{ email }}">Copy</button>{% endif %}</div>
 {% if is_admin %}
-<form method="post" class="grid">
+<form method="post" class="grid sheet-id">
   <input type="hidden" name="csrf" value="{{ csrf }}">
-  <input name="sheet_id" value="{{ config.sheet_id }}" aria-label="Sheet id" required>
+  <label>Sheet id <input name="sheet_id" value="{{ config.sheet_id }}" required></label>
   <button type="submit" name="action" value="sheet_id" class="secondary">Change Sheet</button>
 </form>
 {% else %}
@@ -31,9 +33,9 @@
   {% set rule = (config.tabs or {}).get(tab) %}
   {% set access = (rule or {}).get("customer") or [] %}
   {% set fill = (rule or {}).get("fill") or {} %}
-  <article>
+  <article id="tab-{{ i }}">
     <header>
-      <label><input type="checkbox" name="use{{ i }}"{% if rule is not none %} checked{% endif %}>
+      <label><input type="checkbox" class="use-tab" name="use{{ i }}"{% if rule is not none %} checked{% endif %}>
         <strong>{{ tab }}</strong>: the bot uses this tab (staff can look up and add rows)</label>
       <span class="access-badges">
         {% if rule is none %}<span class="badge">off</span>
@@ -46,6 +48,10 @@
       </span>
       <small>Columns: {{ headers|join(", ") or "(no header row)" }}</small>
     </header>
+    {% for problem in problems if problem.startswith(tab ~ ":") %}
+    <p class="field-error">{{ problem }}</p>
+    {% endfor %}
+    <div class="tab-options">
     <p>Customers can:</p>
     <label><input type="checkbox" name="read{{ i }}"{% if "read" in access %} checked{% endif %}> read all rows</label>
     <label><input type="checkbox" name="own{{ i }}"{% if "own" in access %} checked{% endif %}> see only their own rows, found by the phone number in
@@ -57,10 +63,11 @@
       <select name="fill_phone{{ i }}"><option value="">(none)</option>{% for h in headers %}<option{% if fill.get(h) == "phone" %} selected{% endif %}>{{ h }}</option>{% endfor %}</select>
     </label>
     {% if sensitive[tab] %}
-    <p class="notice error">This tab has contact columns: {{ sensitive[tab]|join(", ") }}.</p>
+    <p class="notice warn">This tab has contact columns: {{ sensitive[tab]|join(", ") }}.</p>
     <label><input type="checkbox" name="confirm{{ i }}"> I understand every customer can see these columns if "read all rows" is ticked</label>
     {% endif %}
-    <button type="submit" name="action" value="preview:{{ tab }}" class="secondary">What a customer would see</button>
+    <button type="submit" name="action" value="preview:{{ tab }}" formaction="{{ base }}/sheet#tab-{{ i }}" class="secondary">What a customer would see</button>
+    </div>
     {% if preview and preview.tab == tab %}
       {% if preview.error %}<p class="notice error">A customer would be told: {{ preview.error }}</p>
       {% elif not preview.rows %}<p>A customer would see no rows.</p>

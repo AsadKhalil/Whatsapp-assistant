@@ -39,3 +39,34 @@ def test_destructive_buttons_ask_first():
     logins = admin.get("/admin/b/acme/logins").text
     assert 'data-confirm="Disable mgr@sweetbakes.pk?' in logins
     assert 'data-confirm="Make a new link for mgr@sweetbakes.pk?' in logins
+
+
+def test_invite_and_number_forms_have_visible_labels():
+    site = Site()
+    site.registry.add_number("spare-1", "", actor="t")
+    admin = site.admin()
+    logins = admin.get("/admin/b/acme/logins").text
+    assert 'aria-label="Email"' not in logins and "<label>Email" in logins
+    number = admin.get("/admin/numbers/spare-1").text
+    assert 'aria-label="Notes"' not in number and 'aria-label="Business"' not in number
+    assert "<label>Answers for" in number
+
+
+def test_staff_table_controls_are_named_for_screen_readers():
+    site = Site()
+    site.bot.waha.group_list["acme"] = [{"id": "staff@g.us", "name": "Kitchen staff"}]
+    page = site.business_user().get("/app/staff").text
+    assert 'aria-label="Kitchen staff: staff group"' in page and 'aria-label="Kitchen staff: gets alerts"' in page
+    assert 'aria-label="No alerts"' in page
+
+
+def test_sheet_preview_returns_to_its_tab_and_problems_show_at_the_tab():
+    site = Site()
+    http = site.business_user()
+    i = list(site.bot.sheets.tab_headers("sheet-1")).index("Orders")
+    page = http.get("/app/sheet").text
+    assert f'id="tab-{i}"' in page and f'formaction="/app/sheet#tab-{i}"' in page
+    r = http.post("/app/sheet", data={"csrf": csrf(http, "/app/sheet"), "action": "save", "tabs_listed": "1",
+                                      f"use{i}": "on", f"own{i}": "on", f"owner{i}": ""})
+    card = r.text.split(f'id="tab-{i}"', 1)[1].split("</article>", 1)[0]
+    assert 'class="field-error"' in card and "pick which column holds" in card

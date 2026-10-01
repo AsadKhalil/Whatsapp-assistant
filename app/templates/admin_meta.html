@@ -34,6 +34,7 @@
       <button type="submit" name="action" value="save">Save keys</button>
       <button type="submit" name="action" value="test" class="secondary">Test connection</button>
     </div>
+    <small>Test connection checks the <em>saved</em> keys, so press Save keys first.</small>
   </form>
   {% if test %}<p class="notice ok">Meta says this is {{ test.display_phone_number }} ({{ test.verified_name }}).</p>{% endif %}
 </section>

@@ -1,11 +1,15 @@
 {% extends "base.html" %}
 {% block content %}
 <h1>Add a business</h1>
-<p>First ask the business to share its Google Sheet with <strong>{{ email or "the client_email in your Google key file" }}</strong> as <em>Editor</em>.</p>
+<p>First ask the business to share its Google Sheet, as <em>Editor</em>, with:</p>
+<div class="share-row"><code>{{ email or "the client_email in your Google key file" }}</code>
+  {% if email %}<button type="button" class="copy-btn" data-copy="{{ email }}">Copy</button>{% endif %}</div>
 <form method="post">
   <input type="hidden" name="csrf" value="{{ csrf }}">
-  <label>Web id (lowercase letters, digits and dashes; it goes into the business's webhook address)
-    <input name="id" value="{{ values.id or '' }}"></label>
+  <label>Web id <small>(optional)</small>
+    <input name="id" value="{{ values.id or '' }}" aria-describedby="id-help"></label>
+  <small id="id-help">Lowercase letters, digits and dashes, used in this business's addresses. Leave it empty to
+    make one from the business name.</small>
   <label>Business name <input name="business" value="{{ values.business or '' }}" required></label>
   <label>Bot name <input name="bot_name" value="{{ values.bot_name or '' }}" required></label>
   <label>Time zone
@@ -13,7 +17,7 @@
   </label>
   <label>Google Sheet id (the long code in the Sheet's web address)
     <input name="sheet_id" value="{{ values.sheet_id or '' }}" required></label>
-  <label>Instructions for the bot <textarea name="instructions" rows="4">{{ values.instructions or '' }}</textarea></label>
+  <label>Instructions for the bot <small>(optional)</small> <textarea name="instructions" rows="4">{{ values.instructions or '' }}</textarea></label>
   {% if sheet_tabs is not none %}<div class="notice ok"><p>The Sheet is readable. Its tabs and columns:</p>
     <ul>{% for tab, headers in sheet_tabs.items() %}<li><strong>{{ tab }}</strong>: {{ headers|join(", ") or "(no header row)" }}</li>{% endfor %}</ul></div>{% endif %}
   <div class="grid">

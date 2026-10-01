@@ -209,7 +209,7 @@ def customer_preview(sheets, business_id: str, config: dict, tab: str) -> dict:
 @screen("/sheet", ("GET", "POST"))
 def sheet_page(request: Request, scope: Scope, form: Form | None) -> Response:
     state, business = request.app.state, scope.business
-    config, error, preview = dict(business.config), "", None
+    config, error, preview, problems = dict(business.config), "", None, []
     email = service_account_email(state.settings.google_service_account_file)
     action = form.get("action") if form is not None else ""
     if action == "sheet_id":
@@ -248,5 +248,5 @@ def sheet_page(request: Request, scope: Scope, form: Form | None) -> Response:
                 else:
                     return redirect(f"{scope.base}/sheet?ok=saved")
     return page(request, scope, "sheet.html", title="Sheet & permissions", config=config, email=email,
-                sheet_tabs=sheet_tabs, sheet_problem=sheet_problem, error=error, preview=preview,
+                sheet_tabs=sheet_tabs, sheet_problem=sheet_problem, error=error, preview=preview, problems=problems,
                 sensitive={tab: sensitive_columns(headers) for tab, headers in sheet_tabs.items()})

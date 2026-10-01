@@ -19,12 +19,12 @@
     <thead><tr><th>Group</th><th>Staff group</th><th>Gets "needs a person" alerts</th></tr></thead>
     <tbody>
       <tr><td><em>No alerts</em></td><td></td>
-        <td><input type="radio" name="alert" value=""{% if not config.staff_alert_chat %} checked{% endif %}></td></tr>
+        <td><input type="radio" name="alert" value=""{% if not config.staff_alert_chat %} checked{% endif %} aria-label="No alerts"></td></tr>
       {% for g in groups %}
       <tr>
         <td>{{ g.name }}</td>
-        <td><input type="checkbox" name="staff_chats" value="{{ g.id }}"{% if g.id in (config.staff_chats or []) %} checked{% endif %}></td>
-        <td><input type="radio" name="alert" value="{{ g.id }}"{% if g.id == config.staff_alert_chat %} checked{% endif %}></td>
+        <td><input type="checkbox" name="staff_chats" value="{{ g.id }}"{% if g.id in (config.staff_chats or []) %} checked{% endif %} aria-label="{{ g.name }}: staff group"></td>
+        <td><input type="radio" name="alert" value="{{ g.id }}"{% if g.id == config.staff_alert_chat %} checked{% endif %} aria-label="{{ g.name }}: gets alerts"></td>
       </tr>
       {% endfor %}
     </tbody>

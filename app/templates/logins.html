@@ -40,9 +40,9 @@
 <form method="post">
   <input type="hidden" name="csrf" value="{{ csrf }}">
   <div class="grid">
-    <input type="email" name="email" placeholder="Email" aria-label="Email" required>
-    <input name="name" placeholder="Name" aria-label="Name">
-    <button type="submit" name="action" value="invite">Create login</button>
+    <label>Email <input type="email" name="email" required autocomplete="off"></label>
+    <label>Name <small>(optional)</small> <input name="name" autocomplete="off"></label>
   </div>
+  <button type="submit" name="action" value="invite">Create login</button>
 </form>
 {% endblock %}

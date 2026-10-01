@@ -295,3 +295,17 @@ button.danger:hover, button.danger:focus-visible {
   margin-top: 2.5rem; padding: 1rem 1.25rem; border: 1px solid var(--danger-line); border-radius: 0.75rem;
 }
 .danger-zone h2 { margin-bottom: 0.3rem; font-size: 1.1rem; }
+
+/* Warnings (not errors), and an error shown next to the thing it is about */
+:root {
+  --warn-soft: oklch(96.5% 0.045 85);
+  --warn-line: oklch(82% 0.1 80);
+  --warn-ink: oklch(42% 0.09 65);
+}
+.notice.warn { background: var(--warn-soft); border-color: var(--warn-line); color: var(--warn-ink); }
+.field-error { margin: 0.4rem 0; color: var(--danger); font-weight: 550; }
+.field-error::before { content: "\26A0\20"; }
+
+/* Sheet page: a tab the bot doesn't use keeps its options visible but quiet */
+article:has(.use-tab:not(:checked)) .tab-options { opacity: 0.55; }
+form.sheet-id { align-items: end; }
