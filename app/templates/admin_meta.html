@@ -1,25 +1,52 @@
 {% extends "base.html" %}
 {% block content %}
+<p><a href="/admin">← Businesses</a></p>
 <h1>Official number (Meta)</h1>
+<p class="muted" style="margin-top:0">Customer 1:1 chats on a Cloud-API number. The number itself is registered
+  in our WhatsApp Manager; this page points the bot at it.</p>
 {% if business.keys_unreadable %}<p class="notice error">The saved keys can't be read (was SECRET_KEY changed?). Enter them again.</p>{% endif %}
-<form method="post">
-  <input type="hidden" name="csrf" value="{{ csrf }}">
-  <label>Phone number ID <input name="phone_number_id" value="{{ business.meta_phone_number_id or '' }}" inputmode="numeric"></label>
-  <label>Access token {% if business.has_meta_token %}<small>(saved, ends in ••••{{ business.meta_token_hint }}; leave empty to keep it)</small>{% endif %}
-    <input type="password" name="access_token" autocomplete="off"></label>
-  <label>App secret {% if business.has_meta_secret %}<small>(saved; leave empty to keep it)</small>{% endif %}
-    <input type="password" name="app_secret" autocomplete="off"></label>
-  <div class="grid">
-    <button type="submit" name="action" value="save">Save keys</button>
-    <button type="submit" name="action" value="test" class="secondary">Test connection</button>
-  </div>
-</form>
-{% if test %}<p class="notice ok">Meta says this is {{ test.display_phone_number }} ({{ test.verified_name }}).</p>{% endif %}
-<h2>Paste these into the business's Meta app</h2>
-<p>In the app's WhatsApp webhook settings:</p>
-<ul>
-  <li>Callback URL: <code>{{ webhook }}</code></li>
-  <li>Verify token: <code>{{ business.meta_verify_token }}</code></li>
-  <li>Subscribe to the <code>messages</code> field.</li>
-</ul>
+
+<section class="setup-phase">
+  <header class="phase-head"><span class="phase-tag">1 · Keys</span><h2>Collect the three values</h2></header>
+  <ol class="steps">
+    <li>
+      <div class="step-body"><strong>Phone number ID</strong>
+        <p>WhatsApp Manager → Phone numbers → the number's <em>ID</em> column (digits only).</p></div>
+    </li>
+    <li>
+      <div class="step-body"><strong>Access token</strong>
+        <p>Usually the server-wide System-User token — leave this empty unless the business runs its own Meta app.
+          Test tokens from the developers console expire in 24 hours.</p></div>
+    </li>
+    <li>
+      <div class="step-body"><strong>App secret</strong>
+        <p>Only for a business with its own Meta app (App settings → Basic → App secret). Leave empty to use ours.</p></div>
+    </li>
+  </ol>
+  <form method="post">
+    <input type="hidden" name="csrf" value="{{ csrf }}">
+    <label>Phone number ID <input name="phone_number_id" value="{{ business.meta_phone_number_id or '' }}" inputmode="numeric"></label>
+    <label>Access token {% if business.has_meta_token %}<small>(saved, ends in ••••{{ business.meta_token_hint }}; leave empty to keep it)</small>{% endif %}
+      <input type="password" name="access_token" autocomplete="off"></label>
+    <label>App secret {% if business.has_meta_secret %}<small>(saved; leave empty to keep it)</small>{% endif %}
+      <input type="password" name="app_secret" autocomplete="off"></label>
+    <div class="grid">
+      <button type="submit" name="action" value="save">Save keys</button>
+      <button type="submit" name="action" value="test" class="secondary">Test connection</button>
+    </div>
+  </form>
+  {% if test %}<p class="notice ok">Meta says this is {{ test.display_phone_number }} ({{ test.verified_name }}).</p>{% endif %}
+</section>
+
+<section class="setup-phase">
+  <header class="phase-head"><span class="phase-tag">2 · Webhook</span><h2>Where Meta delivers this number's messages</h2></header>
+  <p style="margin-top:.3rem">Normally already configured — the server's app subscription covers every number in
+    our account. You only paste these two values if this business runs <em>its own</em> Meta app:</p>
+  <div class="share-row"><code>{{ webhook }}</code>
+    <button type="button" class="copy-btn" data-copy="{{ webhook }}">Copy URL</button></div>
+  <div class="share-row"><code>{{ business.meta_verify_token }}</code>
+    <button type="button" class="copy-btn" data-copy="{{ business.meta_verify_token }}">Copy token</button></div>
+  <p class="muted"><small>Set both in the app's WhatsApp webhook settings and subscribe to the
+    <code>messages</code> field.</small></p>
+</section>
 {% endblock %}

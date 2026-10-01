@@ -204,6 +204,9 @@ img.qr {
 
 .page-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 1rem; }
 .page-head p { max-width: 42rem; }
+article > header { display: flex; flex-wrap: wrap; align-items: center; gap: 0.4rem 0.9rem; }
+.access-badges { display: inline-flex; flex-wrap: wrap; gap: 0.3rem; }
+.back-link { color: var(--muted); font-weight: 550; }
 
 /* First-time setup: phase cards with numbered steps */
 .setup-live {

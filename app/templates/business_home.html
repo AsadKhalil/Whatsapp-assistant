@@ -1,22 +1,55 @@
 {% extends "base.html" %}
 {% block content %}
 {% if not business.active %}<p class="notice error">This business is paused: the bot is not answering anyone.</p>{% endif %}
+
+{% set official_ok = business.meta_phone_number_id and business.has_meta_token %}
+{% set group_ok = group_status == "WORKING" %}
+{% if not official_ok and not group_ok %}
+<section class="setup-phase">
+  <header class="phase-head"><span class="phase-tag">Not live</span>
+    <h2>{{ business.config.business }} can't answer anyone yet</h2></header>
+  <p class="muted" style="margin:.3rem 0 0">A business needs at least one WhatsApp doorway. Pick one — or add both:</p>
+  <ol class="steps">
+    <li>
+      <div class="step-body">
+        <strong><a href="{{ base }}/meta">Official number →</a></strong>
+        <p>Customer 1:1 chats on a Cloud-API number. Paste its phone number ID and keys; each customer's number
+          is registered in our WhatsApp Manager.</p>
+      </div>
+    </li>
+    <li>
+      <div class="step-body">
+        <strong><a href="{{ base }}/number">Group number →</a></strong>
+        <p>The bot inside the client's WhatsApp groups — a purchased SIM linked by QR, answering @mentions.</p>
+      </div>
+    </li>
+  </ol>
+</section>
+{% endif %}
+
 <div class="grid">
   <article>
     <h3>Official number</h3>
-    <p>{% if business.meta_phone_number_id and business.has_meta_token %}Connected (ID {{ business.meta_phone_number_id }}){% else %}Not set up yet{% endif %}</p>
+    <p>{% if business.keys_unreadable %}<span class="badge bad">re-enter keys</span>
+      {% elif official_ok %}<span class="badge good">connected</span> (ID {{ business.meta_phone_number_id }})
+      {% else %}<span class="badge bad">not set up</span>{% endif %}</p>
     <p>Replies this month: <strong id="meta-replies">{{ replies.meta }}</strong><br>
        <small>Meta charges for replies after 1,000 a month.</small></p>
+    <p><a href="{{ base }}/meta">{{ "Manage keys" if official_ok else "Set it up →" }}</a></p>
   </article>
   <article>
     <h3>Group number</h3>
-    <p><span class="badge {{ 'good' if group_status == 'WORKING' else 'bad' }}">{{ group_status }}</span></p>
+    <p><span class="badge {{ 'good' if group_ok else 'bad' }}">{{ group_status }}</span>
+      {% if business.number %}<small> · {{ business.number }}</small>{% endif %}</p>
     <p>Replies this month: <strong id="group-replies">{{ replies.waha }}</strong></p>
+    <p><a href="{{ base }}/number">{{ "Manage" if group_ok else "Link one →" }}</a>
+      {% if group_ok %} · <a href="{{ base }}/staff">choose staff groups</a>{% endif %}</p>
   </article>
 </div>
 <h2>Latest requests for a human</h2>
 {% if handoff_error %}<p class="notice error">{{ handoff_error }}</p>
-{% elif not handoffs %}<p>None yet.</p>
+{% elif not handoffs %}<p>None yet — when a customer asks something the Sheet can't answer, it lands here and
+  in the client's <code>Handoffs</code> tab.</p>
 {% else %}
 <table>
   <thead><tr><th>Time</th><th>Name</th><th>Phone</th><th>Question</th><th>Reason</th></tr></thead>

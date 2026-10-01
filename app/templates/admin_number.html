@@ -1,7 +1,10 @@
 {% extends "base.html" %}
 {% block content %}
+<p><a href="/admin">← Businesses</a></p>
 <h1>Group number</h1>
-<p>Now: {% if business.number %}<strong>{{ business.number }}</strong>{% else %}none{% endif %}</p>
+<p class="muted" style="margin-top:0">The spare-phone SIM that joins this business's WhatsApp groups and answers
+  @mentions. One number serves one business.</p>
+<p>Now: {% if business.number %}<strong>{{ business.number }}</strong>{% else %}<span class="badge bad">none — the bot is not in any groups</span>{% endif %}</p>
 <form method="post">
   <input type="hidden" name="csrf" value="{{ csrf }}">
   <label>Use this purchased number
@@ -12,5 +15,6 @@
   </label>
   <button type="submit">Save</button>
 </form>
-<p><a href="/admin/numbers">Manage purchased numbers</a></p>
+<p>No spare number yet? <a href="/admin/numbers">Add one — the QR flow takes two minutes →</a></p>
 {% endblock %}
+

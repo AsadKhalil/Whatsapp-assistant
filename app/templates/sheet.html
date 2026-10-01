@@ -35,6 +35,15 @@
     <header>
       <label><input type="checkbox" name="use{{ i }}"{% if rule is not none %} checked{% endif %}>
         <strong>{{ tab }}</strong>: the bot uses this tab (staff can look up and add rows)</label>
+      <span class="access-badges">
+        {% if rule is none %}<span class="badge">off</span>
+        {% else %}<span class="badge good">on</span>
+          {%- if "read" in access %} <span class="badge">customers read</span>{% endif %}
+          {%- if "own" in access %} <span class="badge">own rows only</span>{% endif %}
+          {%- if "append" in access %} <span class="badge">customers add</span>{% endif %}
+          {%- if not access %} <span class="badge">staff only</span>{% endif %}
+        {% endif %}
+      </span>
       <small>Columns: {{ headers|join(", ") or "(no header row)" }}</small>
     </header>
     <p>Customers can:</p>
