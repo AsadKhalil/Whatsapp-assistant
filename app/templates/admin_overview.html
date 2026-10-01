@@ -2,30 +2,88 @@
 {% block content %}
 <h1>Businesses</h1>
 {% if not rows %}
-<article class="setup">
-  <h2>First-time setup</h2>
-  <p class="muted">The bot is running. This is the order to wire it up — each step links where you'll click.</p>
+<p class="setup-live"><span class="dot-live" aria-hidden="true"></span>
+  Server is live — HTTPS, the Google key and the AI key are all working. What's left is wiring up a client:</p>
+
+<section class="setup-phase">
+  <header class="phase-head"><span class="phase-tag">Do now</span>
+    <h2>Set up your first client</h2></header>
   <ol class="steps">
-    <li>On the server, put the Google service-account key at <code>secrets/google-service-account.json</code> (in the
-      <code>Whatsapp-assistant</code> folder), then share the business's Google Sheet with the key's <code>client_email</code>
-      as <strong>Editor</strong>. The bot reads prices and writes orders through it.</li>
-    <li><a href="/admin/new">Add a business</a> — web id, business and bot names, time zone, and the Sheet's id
-      (the long code in the Sheet's web address). Press <em>Check Sheet access</em>; if it lists your tabs, step 1 worked.</li>
-    <li>Open the business → <strong>Sheet</strong>: pick the Knowledge and Handoffs tabs, and set what customers may
-      read or add on each tab.</li>
-    <li><strong>Staff &amp; groups</strong>: paste staff WhatsApp numbers (with country code) — they save rows without
-      confirmation; everyone else is a customer.</li>
-    <li><strong>Official number</strong>: paste the client's Meta token, app secret and phone-number id. Then set the
-      webhook URL and verify token shown there in the client's Meta app, subscribing to <em>messages</em>. Meta also
-      needs a payment method on the client's WhatsApp account.</li>
-    <li><strong>Numbers</strong> (top bar): add a purchased number and scan the QR with the spare phone, then add it to
-      the client's WhatsApp groups.</li>
-    <li>Send the official number a message and watch it answer. Point a free monitor at
-      <code>/health</code> so you know if it ever goes down.</li>
+    <li>
+      <div class="step-body">
+        <strong>Share the Sheet with the bot</strong>
+        <p>In Google Sheets press <em>Share</em>, paste this address and give it <strong>Editor</strong>.
+          One address works for every client's Sheet.</p>
+        <div class="share-row">
+          <code>{{ robot_email or "the client_email inside secrets/google-service-account.json" }}</code>
+          {% if robot_email %}<button type="button" class="copy-btn" data-copy="{{ robot_email }}">Copy</button>{% endif %}
+        </div>
+      </div>
+    </li>
+    <li>
+      <div class="step-body">
+        <strong><a href="/admin/new">Add the business →</a></strong>
+        <p>Name, bot name, time zone, and the <em>Sheet id</em> — the long code in the Sheet's web address,
+          between <code>/d/</code> and <code>/edit</code>. Then press <em>Check Sheet access</em>:
+          if your tabs appear, this step works.</p>
+      </div>
+    </li>
+    <li>
+      <div class="step-body">
+        <strong>Pick the tabs the bot may use</strong>
+        <p>Inside the business → <strong>Sheet</strong>: choose the Knowledge and Handoffs tabs, and set what
+          customers may read or add on each tab.</p>
+      </div>
+    </li>
+    <li>
+      <div class="step-body">
+        <strong>Add staff</strong>
+        <p><strong>Staff &amp; groups</strong> → paste staff WhatsApp numbers with the country code.
+          Staff save rows instantly; customers confirm with YES.</p>
+      </div>
+    </li>
   </ol>
-  <p class="muted"><small>The full click-by-click guide lives in the repo:
-    <a href="https://github.com/AsadKhalil/Whatsapp-assistant/blob/main/docs/setup-guide.md" target="_blank" rel="noopener">docs/setup-guide.md</a>.</small></p>
-</article>
+</section>
+
+<section class="setup-phase">
+  <header class="phase-head"><span class="phase-tag">Then</span>
+    <h2>Connect WhatsApp numbers</h2></header>
+  <ol class="steps" style="counter-reset: step 4">
+    <li>
+      <div class="step-body">
+        <strong>Official number — customer chats</strong>
+        <p>Business → <strong>Official number</strong>: paste the client's Meta token, app secret and phone-number
+          id. Set the webhook URL and verify token shown there inside the client's Meta app
+          (subscribe to <em>messages</em>), and add a payment method in the client's WhatsApp account.</p>
+      </div>
+    </li>
+    <li>
+      <div class="step-body">
+        <strong>Group number — group @mentions</strong>
+        <p><strong>Numbers</strong> in the top bar → add a purchased number → scan the QR with the spare phone →
+          add it to the client's groups. Keep that phone online at least every 14 days.</p>
+      </div>
+    </li>
+  </ol>
+</section>
+
+<section class="setup-phase">
+  <header class="phase-head"><span class="phase-tag">Finally</span>
+    <h2>Go live</h2></header>
+  <ol class="steps" style="counter-reset: step 6">
+    <li>
+      <div class="step-body">
+        <strong>Test it</strong>
+        <p>Message the official number a question that's answered by the Sheet — the reply should arrive in seconds.
+          Point a free monitor (e.g. UptimeRobot) at <code>/health</code> so you know if it ever goes down.</p>
+      </div>
+    </li>
+  </ol>
+</section>
+
+<p class="muted"><small>Full click-by-click manual:
+  <a href="https://github.com/AsadKhalil/Whatsapp-assistant/blob/main/docs/setup-guide.md" target="_blank" rel="noopener">docs/setup-guide.md</a>.</small></p>
+
 {% else %}
 <p><a href="/admin/new" role="button">Add a business</a></p>
 <table>

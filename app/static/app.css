@@ -202,18 +202,42 @@ img.qr {
 .msg.bot { align-self: flex-start; background: var(--surface); border: 1px solid var(--line-soft); }
 .msg.customer { align-self: flex-end; background: var(--accent-soft); border: 1px solid var(--accent-line); }
 
-/* First-time setup checklist */
-article.setup { max-width: 46rem; }
-ol.steps { list-style: none; margin: 0.75rem 0 0; padding: 0; display: grid; gap: 0.8rem; counter-reset: step; }
-ol.steps li { counter-increment: step; display: flex; gap: 0.7rem; align-items: baseline; margin: 0; }
+/* First-time setup: phase cards with numbered steps */
+.setup-live {
+  display: flex; align-items: center; gap: 0.55rem;
+  margin: 0 0 1.25rem; padding: 0.65rem 1rem;
+  border: 1px solid var(--accent-line); border-radius: var(--radius-sm);
+  background: var(--accent-soft); color: var(--ok-ink); font-size: 0.95rem;
+}
+.dot-live { width: 0.55rem; height: 0.55rem; border-radius: 999px; background: var(--accent); flex: none; }
+.setup-phase {
+  max-width: 44rem; margin: 0 0 1rem; padding: 1.1rem 1.25rem 1rem;
+  background: var(--surface); border: 1px solid var(--line-soft);
+  border-radius: var(--radius); box-shadow: var(--shadow-sm);
+}
+.phase-head { display: flex; align-items: center; gap: 0.7rem; margin-bottom: 0.2rem; }
+.phase-head h2 { margin: 0; font-size: 1.05rem; }
+.phase-tag {
+  flex: none; padding: 0.14rem 0.6rem; border-radius: 999px;
+  font-size: 0.72rem; font-weight: 700; letter-spacing: 0.07em; text-transform: uppercase;
+  background: var(--surface-2); color: var(--muted); border: 1px solid var(--line-soft);
+}
+.setup-phase:first-of-type .phase-tag { background: var(--accent-soft); color: var(--ok-ink); border-color: var(--accent-line); }
+ol.steps { list-style: none; margin: 0.5rem 0 0; padding: 0; display: grid; gap: 0.9rem; counter-reset: step; }
+ol.steps li {
+  counter-increment: step; margin: 0;
+  display: grid; grid-template-columns: 1.55rem 1fr; gap: 0.65rem; align-items: start;
+}
 ol.steps li::before {
-  content: counter(step); flex: none;
+  content: counter(step);
   width: 1.55rem; height: 1.55rem; border-radius: 999px;
   background: var(--accent-soft); color: var(--ok-ink);
-  font-weight: 650; font-size: 0.85rem;
-  display: inline-flex; align-items: center; justify-content: center;
-  transform: translateY(0.25rem);
+  font-weight: 650; font-size: 0.85rem; line-height: 1.55rem; text-align: center;
 }
+.step-body p { margin: 0.15rem 0 0; color: var(--ink-soft); font-size: 0.94rem; }
+.step-body a { font-weight: 600; }
+.share-row { display: flex; align-items: center; gap: 0.4rem; margin-top: 0.4rem; flex-wrap: wrap; }
+.share-row code { font-size: 0.85rem; word-break: break-all; }
 
 /* Toasts: brief confirmations, bottom right, click to dismiss */
 #toasts {

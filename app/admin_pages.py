@@ -26,7 +26,8 @@ def overview(request: Request, sess: Session, form: Form | None) -> Response:
         rows.append({"b": business,
                      "group": state.bot.waha.status(business.number) if business.number else "not linked",
                      "replies": state.bot.store.replies_since(business.id, month_start(state.bot.clock(), timezone))})
-    return render(request, "admin_overview.html", sess, title="Businesses", rows=rows)
+    return render(request, "admin_overview.html", sess, title="Businesses", rows=rows,
+                  robot_email=service_account_email(state.settings.google_service_account_file))
 
 
 @route(router, "/admin/new", admin_only, ("GET", "POST"))
