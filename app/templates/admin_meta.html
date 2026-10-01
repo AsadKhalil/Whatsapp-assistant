@@ -2,7 +2,7 @@
 {% block content %}
 <p><a href="/admin">← Businesses</a></p>
 <h1>Official number (Meta)</h1>
-<p class="muted" style="margin-top:0">Customer 1:1 chats on a Cloud-API number. The number itself is registered
+<p class="muted lede">Customer 1:1 chats on a Cloud-API number. The number itself is registered
   in our WhatsApp Manager; this page points the bot at it.</p>
 {% if business.keys_unreadable %}<p class="notice error">The saved keys can't be read (was SECRET_KEY changed?). Enter them again.</p>{% endif %}
 
@@ -40,7 +40,7 @@
 
 <section class="setup-phase">
   <header class="phase-head"><span class="phase-tag">2 · Webhook</span><h2>Where Meta delivers this number's messages</h2></header>
-  <p style="margin-top:.3rem">Normally already configured — the server's app subscription covers every number in
+  <p class="lede">Normally already configured — the server's app subscription covers every number in
     our account. You only paste these two values if this business runs <em>its own</em> Meta app:</p>
   <div class="share-row"><code>{{ webhook }}</code>
     <button type="button" class="copy-btn" data-copy="{{ webhook }}">Copy URL</button></div>

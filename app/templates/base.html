@@ -6,9 +6,10 @@
   {% if refresh %}<meta http-equiv="refresh" content="{{ refresh }}">{% endif %}
   <title>{{ title }} · WhatsApp Assistant</title>
   <link rel="stylesheet" href="/static/pico.min.css">
-  <link rel="stylesheet" href="/static/app.css?v=10">
+  <link rel="stylesheet" href="/static/app.css?v=11">
 </head>
 <body>
+<a class="skip-link" href="#main">Skip to content</a>
 <header class="topbar">
   <div class="container topbar-in">
     <a class="brand" href="/"><span class="brand-dot" aria-hidden="true"></span>WhatsApp&hairsp;<strong>Assistant</strong></a>
@@ -28,7 +29,7 @@
     {% endif %}
   </div>
 </header>
-<main class="container">
+<main class="container" id="main" tabindex="-1">
   {% if business_nav %}<nav class="tabs" aria-label="Business"><ul>{% include "_business_nav.html" %}</ul><ul>
     <li><a href="{{ base }}">Home</a></li>
     <li><a href="{{ base }}/settings">Bot settings</a></li>
@@ -40,19 +41,12 @@
     <li><a href="{{ base }}/number">Group number</a></li>
     <li><a href="{{ base }}/logins">Logins</a></li>
     <li><a href="{{ base }}/audit">Audit log</a></li>
-    <li>
-      <form method="post" action="{{ base }}/pause" class="inline">
-        <input type="hidden" name="csrf" value="{{ csrf }}">
-        <input type="hidden" name="active" value="{{ '0' if business.active else '1' }}">
-        <button type="submit" class="secondary outline">{{ "Pause business" if business.active else "Resume business" }}</button>
-      </form>
-    </li>
     {% endif %}
   </ul></nav>{% endif %}
-  {% if error %}<p class="notice error">{{ error }}</p>{% endif %}
+  {% if error %}<p class="notice error" id="page-error" role="alert" tabindex="-1">{{ error }}</p>{% endif %}
   {% block content %}{% endblock %}
 </main>
 <div id="toasts" role="status" aria-live="polite"{% if ok %} data-ok="{{ ok }}"{% endif %}></div>
-<script src="/static/app.js" defer></script>
+<script src="/static/app.js?v=2" defer></script>
 </body>
 </html>

@@ -18,9 +18,15 @@
       <form method="post" class="inline">
         <input type="hidden" name="csrf" value="{{ csrf }}">
         <input type="hidden" name="user_id" value="{{ u.id }}">
-        <button type="submit" name="action" value="link" class="secondary outline">New link</button>
+        <button type="submit" name="action" value="link" class="secondary outline"
+                data-confirm="Make a new link for {{ u.email }}? Their current password stops working and they're signed out.">New link</button>
         {% if u.id != self_id %}
-        <button type="submit" name="action" value="{{ 'enable' if u.disabled else 'disable' }}" class="secondary outline">{{ "Enable" if u.disabled else "Disable" }}</button>
+        {% if u.disabled %}
+        <button type="submit" name="action" value="enable" class="secondary outline">Enable</button>
+        {% else %}
+        <button type="submit" name="action" value="disable" class="danger"
+                data-confirm="Disable {{ u.email }}? They are signed out at once and can't log in until you enable them.">Disable</button>
+        {% endif %}
         {% endif %}
       </form>
     </td>

@@ -273,3 +273,25 @@ input, select, textarea { box-shadow: none; }
 @media (prefers-reduced-motion: reduce) {
   .toast { transition: none; }
 }
+
+/* Replacements for inline styles, which the Content-Security-Policy blocks */
+.lede { margin: 0.3rem 0 0; }
+ol.steps.from-5 { counter-reset: step 4; }
+ol.steps.from-7 { counter-reset: step 6; }
+
+/* Skip link: hidden until a keyboard user tabs to it */
+.skip-link {
+  position: absolute; left: -999px; top: 0.5rem; z-index: 20;
+  padding: 0.45rem 0.9rem; border-radius: 0.5rem; background: var(--surface); color: var(--ink);
+}
+.skip-link:focus { left: 0.5rem; }
+
+/* Destructive actions: red outline, kept apart from the primary buttons */
+button.danger { background: transparent; color: var(--danger); border: 1px solid var(--danger-line); }
+button.danger:hover, button.danger:focus-visible {
+  background: var(--danger-soft); color: var(--danger); border-color: var(--danger);
+}
+.danger-zone {
+  margin-top: 2.5rem; padding: 1rem 1.25rem; border: 1px solid var(--danger-line); border-radius: 0.75rem;
+}
+.danger-zone h2 { margin-bottom: 0.3rem; font-size: 1.1rem; }

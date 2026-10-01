@@ -63,7 +63,7 @@
 {% else %}
 <section class="setup-phase">
   <header class="phase-head"><span class="phase-tag">Not running</span><h2>Start the session again</h2></header>
-  <p class="muted" style="margin-top: .4rem">
+  <p class="muted lede">
     Status <strong>{{ waha_status }}</strong> means the server has no live WhatsApp session for this number.
     Press <em>Relink</em> below — it creates the session if it is missing and starts a stopped one — then scan
     the fresh QR code.</p>
@@ -75,10 +75,14 @@
   <form method="post" action="/admin/numbers/{{ number.session }}/relink">
     <input type="hidden" name="csrf" value="{{ csrf }}"><button type="submit" class="secondary">Relink</button></form>
   <form method="post" action="/admin/numbers/{{ number.session }}/logout">
-    <input type="hidden" name="csrf" value="{{ csrf }}"><button type="submit" class="secondary">Log out</button></form>
+    <input type="hidden" name="csrf" value="{{ csrf }}">
+    <button type="submit" class="danger"
+            data-confirm="Log out {{ number.session }}? The bot stops answering in its groups until the phone scans a new QR code.">Log out</button></form>
   {% if not number.business_id %}
   <form method="post" action="/admin/numbers/{{ number.session }}/delete">
-    <input type="hidden" name="csrf" value="{{ csrf }}"><button type="submit" class="secondary">Delete</button></form>
+    <input type="hidden" name="csrf" value="{{ csrf }}">
+    <button type="submit" class="danger"
+            data-confirm="Delete {{ number.session }}? It is removed from the server and its phone must be linked again to use it.">Delete</button></form>
   {% endif %}
 </div>
 <h2>Business</h2>
