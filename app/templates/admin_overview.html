@@ -1,8 +1,33 @@
 {% extends "base.html" %}
 {% block content %}
 <h1>Businesses</h1>
+{% if not rows %}
+<article class="setup">
+  <h2>First-time setup</h2>
+  <p class="muted">The bot is running. This is the order to wire it up — each step links where you'll click.</p>
+  <ol class="steps">
+    <li>On the server, put the Google service-account key at <code>secrets/google-service-account.json</code> (in the
+      <code>Whatsapp-assistant</code> folder), then share the business's Google Sheet with the key's <code>client_email</code>
+      as <strong>Editor</strong>. The bot reads prices and writes orders through it.</li>
+    <li><a href="/admin/new">Add a business</a> — web id, business and bot names, time zone, and the Sheet's id
+      (the long code in the Sheet's web address). Press <em>Check Sheet access</em>; if it lists your tabs, step 1 worked.</li>
+    <li>Open the business → <strong>Sheet</strong>: pick the Knowledge and Handoffs tabs, and set what customers may
+      read or add on each tab.</li>
+    <li><strong>Staff &amp; groups</strong>: paste staff WhatsApp numbers (with country code) — they save rows without
+      confirmation; everyone else is a customer.</li>
+    <li><strong>Official number</strong>: paste the client's Meta token, app secret and phone-number id. Then set the
+      webhook URL and verify token shown there in the client's Meta app, subscribing to <em>messages</em>. Meta also
+      needs a payment method on the client's WhatsApp account.</li>
+    <li><strong>Numbers</strong> (top bar): add a purchased number and scan the QR with the spare phone, then add it to
+      the client's WhatsApp groups.</li>
+    <li>Send the official number a message and watch it answer. Point a free monitor at
+      <code>/health</code> so you know if it ever goes down.</li>
+  </ol>
+  <p class="muted"><small>The full click-by-click guide lives in the repo:
+    <a href="https://github.com/AsadKhalil/Whatsapp-assistant/blob/main/docs/setup-guide.md" target="_blank" rel="noopener">docs/setup-guide.md</a>.</small></p>
+</article>
+{% else %}
 <p><a href="/admin/new" role="button">Add a business</a></p>
-{% if not rows %}<p>No businesses yet.</p>{% else %}
 <table>
   <thead><tr><th>Business</th><th>Official number</th><th>Group number</th><th>Official replies this month</th><th>Group replies this month</th></tr></thead>
   <tbody>

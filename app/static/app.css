@@ -202,6 +202,19 @@ img.qr {
 .msg.bot { align-self: flex-start; background: var(--surface); border: 1px solid var(--line-soft); }
 .msg.customer { align-self: flex-end; background: var(--accent-soft); border: 1px solid var(--accent-line); }
 
+/* First-time setup checklist */
+article.setup { max-width: 46rem; }
+ol.steps { list-style: none; margin: 0.75rem 0 0; padding: 0; display: grid; gap: 0.8rem; counter-reset: step; }
+ol.steps li { counter-increment: step; display: flex; gap: 0.7rem; align-items: baseline; margin: 0; }
+ol.steps li::before {
+  content: counter(step); flex: none;
+  width: 1.55rem; height: 1.55rem; border-radius: 999px;
+  background: var(--accent-soft); color: var(--ok-ink);
+  font-weight: 650; font-size: 0.85rem;
+  display: inline-flex; align-items: center; justify-content: center;
+  transform: translateY(0.25rem);
+}
+
 /* Toasts: brief confirmations, bottom right, click to dismiss */
 #toasts {
   position: fixed; right: 1.25rem; bottom: 1.25rem; z-index: 100;
