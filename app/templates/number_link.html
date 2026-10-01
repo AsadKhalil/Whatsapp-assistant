@@ -2,18 +2,75 @@
 {% block content %}
 <p><a href="/admin/numbers">← All numbers</a></p>
 <h1>{{ number.session }}</h1>
-<p>Status: <span class="badge {{ 'good' if waha_status == 'WORKING' else 'bad' }}">{{ waha_status }}</span>{% if number.phone %} · +{{ number.phone }}{% endif %}</p>
+<p>Status: <span class="badge {{ 'good' if waha_status == 'WORKING' else 'bad' }}">{{ waha_status }}</span>
+  {%- if number.phone %} · linked as <strong>+{{ number.phone }}</strong>{% endif %}</p>
+
 {% if waha_status == "SCAN_QR_CODE" %}
-<p>On the purchased phone open WhatsApp → Settings → Linked devices → Link a device, and scan:</p>
-<img class="qr" src="/admin/numbers/{{ number.session }}/qr.png?t={{ now }}" alt="QR code that links this number">
-<p><small>This page refreshes every 3 seconds.</small></p>
+<section class="setup-phase">
+  <header class="phase-head"><span class="phase-tag">Link it</span><h2>Scan with the bot's phone</h2></header>
+  <ol class="steps">
+    <li>
+      <div class="step-body"><strong>The phone needs WhatsApp running on this SIM first</strong>
+        <p>Install WhatsApp on the spare phone and register it with the SIM's number (verify by the SMS code).
+          The bot's number is a normal WhatsApp account; this scan links it to the server, like WhatsApp Web.</p></div>
+    </li>
+    <li>
+      <div class="step-body"><strong>Open Linked devices</strong>
+        <p>In WhatsApp: <em>Settings → Linked devices → Link a device</em>.</p></div>
+    </li>
+    <li>
+      <div class="step-body"><strong>Point the camera at this code</strong>
+        <p>The code refreshes by itself — always scan the one on screen now.</p>
+        <img class="qr" src="/admin/numbers/{{ number.session }}/qr.png?t={{ now }}" alt="QR code that links this number">
+      </div>
+    </li>
+  </ol>
+</section>
+
 {% elif waha_status == "WORKING" %}
-<p class="notice ok">Linked. Add this number to the business's WhatsApp groups; it introduces itself there.</p>
+<section class="setup-phase">
+  <header class="phase-head"><span class="phase-tag">Live</span><h2>The number is linked and answering</h2></header>
+  <ol class="steps">
+    <li>
+      <div class="step-body"><strong>Add the number to the client's WhatsApp groups</strong>
+        <p>From any phone in the group: <em>Add participant</em> → this number. The bot introduces itself when it
+          joins, and answers whenever someone <strong>@mentions</strong> it. It also answers anyone who messages
+          it one-to-one.</p></div>
+    </li>
+    <li>
+      <div class="step-body"><strong>Tell the bot which groups matter</strong>
+        <p>{% if number.business_id %}
+          In <a href="/admin/b/{{ number.business_id }}/staff">this business → Staff &amp; groups</a>: tick the staff
+          groups (staff save rows without a YES) and pick the group that receives "needs a person" alerts.
+          {% else %}
+          Assign the number to a business below first; then its <em>Staff &amp; groups</em> page lets you tick
+          staff groups and the alerts group.
+          {% endif %}</p></div>
+    </li>
+    <li>
+      <div class="step-body"><strong>Keep the phone alive</strong>
+        <p>Leave the spare phone on a charger with internet. WhatsApp logs linked devices out if the phone stays
+          offline ~14 days. If the bot ever unlinks, this page's status turns red and
+          <code>/health</code> starts failing — point an uptime monitor (e.g. UptimeRobot) at it so you get an
+          email instead of a silent dead bot. Relinking is just pressing <em>Relink</em> and scanning again.</p></div>
+    </li>
+  </ol>
+</section>
+
 {% elif waha_status == "STARTING" %}
-<p>Starting... this page refreshes every 3 seconds.</p>
+<p class="notice">Starting… this page refreshes every 3 seconds.</p>
+
 {% else %}
-<p>Not running. Press <em>Relink</em> to start it and get a new QR code.</p>
+<section class="setup-phase">
+  <header class="phase-head"><span class="phase-tag">Not running</span><h2>Start the session again</h2></header>
+  <p class="muted" style="margin-top: .4rem">
+    Status <strong>{{ waha_status }}</strong> means the server has no live WhatsApp session for this number.
+    Press <em>Relink</em> below — it creates the session if it is missing and starts a stopped one — then scan
+    the fresh QR code.</p>
+</section>
 {% endif %}
+
+<h2>Controls</h2>
 <div class="grid">
   <form method="post" action="/admin/numbers/{{ number.session }}/relink">
     <input type="hidden" name="csrf" value="{{ csrf }}"><button type="submit" class="secondary">Relink</button></form>
