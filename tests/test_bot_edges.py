@@ -49,6 +49,23 @@ def test_voice_note_failures_obey_the_burst_limit():
     assert len(bot.meta.sent) == 6
 
 
+def test_the_daily_ceiling_stops_replies_when_the_business_hits_it():
+    import app.bot as bot_module
+    bot, llm = make_bot(say("One."), say("Two."), say("Back."))
+    original = bot_module.DAILY_REPLY_LIMIT
+    bot_module.DAILY_REPLY_LIMIT = 2
+    try:
+        for i in range(3):
+            bot.handle(incoming(f"message {i}", msg_id=f"m{i}"))
+    finally:
+        bot_module.DAILY_REPLY_LIMIT = original
+    assert len(bot.meta.sent) == 2 and texts(bot.meta)[-1] == "Two."
+    bot.store.save_message("acme", "meta", "older", "c", "bot", "Sara", "old", True, bot.clock() - 90_000)
+    bot.handle(incoming("after the window", msg_id="m9"))
+    assert texts(bot.meta)[-1] == "Back."  # the ceiling is a rolling 24h, not forever
+    assert len(llm.calls) == 3  # message 2 was stopped before it reached the model
+
+
 def test_images_get_a_text_only_reply():
     bot, llm = make_bot()
     bot.handle(incoming("", kind="unsupported"))

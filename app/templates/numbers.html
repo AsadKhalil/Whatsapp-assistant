@@ -1,30 +1,60 @@
 {% extends "base.html" %}
 {% block content %}
-<h1>Purchased numbers</h1>
-<p>Each number is a SIM in a spare phone, linked like WhatsApp Web. Keep every phone online at least once every 14 days.</p>
+<div class="page-head">
+  <div>
+    <h1>Purchased numbers</h1>
+    <p class="muted" style="margin:0">The group-bot numbers: each is a SIM in a spare phone, linked here like
+      WhatsApp Web. Keep every phone on a charger and online — WhatsApp logs a number out if its phone stays
+      offline for ~14 days, and this page (and <code>/health</code>) will show it red when that happens.</p>
+  </div>
+</div>
+{% if not rows %}
+<section class="setup-phase">
+  <header class="phase-head"><span class="phase-tag">Start here</span><h2>Add your first group number</h2></header>
+  <ol class="steps">
+    <li>
+      <div class="step-body"><strong>Get a cheap SIM and a spare Android phone</strong>
+        <p>Install WhatsApp on the phone and register it with that SIM's number.</p></div>
+    </li>
+    <li>
+      <div class="step-body"><strong>Add it below with a session name</strong>
+        <p>A short id like <code>sweetbakes-1</code>. The next screen shows a QR code.</p></div>
+    </li>
+    <li>
+      <div class="step-body"><strong>Scan, add to groups, done</strong>
+        <p>WhatsApp → <em>Linked devices → Link a device</em> on the spare phone, then add the number to your
+          client's groups — it introduces itself and answers @mentions there.</p></div>
+    </li>
+  </ol>
+</section>
+{% else %}
 <table>
   <thead><tr><th>Session</th><th>Phone</th><th>Status</th><th>Business</th><th>Notes</th></tr></thead>
   <tbody>
   {% for r in rows %}
   <tr>
     <td><a href="/admin/numbers/{{ r.n.session }}">{{ r.n.session }}</a></td>
-    <td>{% if r.n.phone %}+{{ r.n.phone }}{% endif %}</td>
-    <td><span class="badge {{ 'good' if r.status == 'WORKING' else 'bad' }}">{{ r.status }}</span></td>
+    <td>{% if r.n.phone %}+{{ r.n.phone }}{% else %}<span class="muted">not linked yet</span>{% endif %}</td>
+    <td><span class="badge {{ 'good' if r.status == 'WORKING' else 'bad' }}">{{ r.status }}</span>
+      {% if r.status == "SCAN_QR_CODE" %}<small class="muted">waiting for the QR scan</small>
+      {% elif r.status == "WORKING" %}<small class="muted">answering</small>
+      {% elif r.status != "UNREACHABLE" %}<small class="muted">open it and press Relink</small>{% endif %}</td>
     <td>{{ names.get(r.n.business_id, "—") }}</td>
     <td>{{ r.n.notes }}</td>
   </tr>
-  {% else %}
-  <tr><td colspan="5">No numbers yet.</td></tr>
   {% endfor %}
   </tbody>
 </table>
+{% endif %}
 <h2>Add a number</h2>
 <form method="post" action="/admin/numbers">
   <input type="hidden" name="csrf" value="{{ csrf }}">
   <div class="grid">
-    <input name="session" placeholder="Session name, e.g. sweetbakes-1" aria-label="Session name" value="{{ session }}" required>
-    <input name="notes" placeholder="Notes: carrier, SIM cost, renewal date" aria-label="Notes" value="{{ notes }}">
-    <button type="submit">Add and show the QR code</button>
+    <label>Session name
+      <input name="session" placeholder="e.g. sweetbakes-1" aria-label="Session name" value="{{ session }}" required></label>
+    <label>Notes (carrier, SIM cost, renewal date)
+      <input name="notes" placeholder="e.g. Jazz SIM, bought 2026-10" aria-label="Notes" value="{{ notes }}"></label>
   </div>
+  <button type="submit">Add and show the QR code</button>
 </form>
 {% endblock %}
