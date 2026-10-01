@@ -83,6 +83,8 @@ class Client:
     meta_access_token: str = field(default="", repr=False)  # this business's own Meta keys (from the dashboard)
     meta_app_secret: str = field(default="", repr=False)
     meta_verify_token: str = field(default="", repr=False)
+    email_address: str = ""  # the business's Gmail address for staff emails (from the dashboard)
+    email_app_password: str = field(default="", repr=False)
 
 
 def _tab_rule(client_id: str, tab: str, raw: dict) -> TabRule:

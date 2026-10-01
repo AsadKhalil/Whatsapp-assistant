@@ -14,6 +14,7 @@ import yaml
 
 from app.config import Client, Settings, client_from_dict, digits
 from app.db import Db
+from app.mailer import is_email
 from app.vault import Vault, VaultError
 
 log = logging.getLogger("registry")
@@ -46,12 +47,20 @@ CREATE TABLE IF NOT EXISTS audit (
   detail TEXT NOT NULL DEFAULT ''
 );
 CREATE INDEX IF NOT EXISTS audit_by_business ON audit (business_id, at);
+CREATE TABLE IF NOT EXISTS email_accounts (
+  business_id TEXT PRIMARY KEY REFERENCES businesses(id),
+  address TEXT NOT NULL,
+  app_password TEXT NOT NULL,
+  updated_at REAL NOT NULL
+);
 """
 SLUG = re.compile(r"[a-z0-9][a-z0-9-]{1,30}[a-z0-9]")
 CONFIG_KEYS = frozenset({"business", "bot_name", "sheet_id", "timezone", "date_format", "instructions",
                          "knowledge_tab", "handoff_tab", "staff_chats", "staff_numbers", "staff_alert_chat",
                          "retention_days", "tabs"})
-SELECT_BUSINESS = "SELECT b.*, n.session FROM businesses b LEFT JOIN numbers n ON n.business_id = b.id"
+SELECT_BUSINESS = ("SELECT b.*, n.session, e.address AS email_address, e.app_password AS email_app_password"
+                   " FROM businesses b LEFT JOIN numbers n ON n.business_id = b.id"
+                   " LEFT JOIN email_accounts e ON e.business_id = b.id")
 
 
 @dataclass(frozen=True)
@@ -67,6 +76,9 @@ class Business:
     active: bool
     number: str | None  # the assigned WAHA session
     keys_unreadable: bool  # sealed Meta keys can't be opened: SECRET_KEY changed
+    email_address: str = ""  # the business's Gmail for staff emails, or ""
+    has_email_password: bool = False
+    email_unreadable: bool = False  # the saved app password can't be opened: SECRET_KEY changed
 
 
 @dataclass(frozen=True)
@@ -111,11 +123,14 @@ class Registry:
 
     def _business(self, row: sqlite3.Row) -> Business:
         token, secret = self._open(row["meta_access_token"]), self._open(row["meta_app_secret"])
+        email_password = self._open(row["email_app_password"])
         return Business(id=row["id"], config=json.loads(row["config"]),
                         meta_phone_number_id=row["meta_phone_number_id"], has_meta_token=bool(token),
                         has_meta_secret=bool(secret), meta_token_hint=(token or "")[-4:],
                         meta_verify_token=row["meta_verify_token"], active=bool(row["active"]),
-                        number=row["session"], keys_unreadable=token is None or secret is None)
+                        number=row["session"], keys_unreadable=token is None or secret is None,
+                        email_address=row["email_address"] or "", has_email_password=bool(email_password),
+                        email_unreadable=email_password is None)
 
     def businesses(self) -> list[Business]:
         return [self._business(r) for r in self.db.all(SELECT_BUSINESS + " ORDER BY b.id")]
@@ -138,9 +153,13 @@ class Registry:
                 continue
             # an app secret that can't be opened becomes one no signature matches, so both webhooks fail closed
             app_secret = self._open(row["meta_app_secret"])
+            # no app password, or one that can't be opened, leaves email switched off for this business
+            email_password = self._open(row["email_app_password"]) or ""
             out[client.id] = replace(client, meta_access_token=self._open(row["meta_access_token"]) or "",
                                      meta_app_secret=secrets.token_hex(32) if app_secret is None else app_secret,
-                                     meta_verify_token=row["meta_verify_token"])
+                                     meta_verify_token=row["meta_verify_token"],
+                                     email_address=(row["email_address"] or "") if email_password else "",
+                                     email_app_password=email_password)
         return out
 
     def _clean(self, business_id: str, config: dict) -> dict:
@@ -206,6 +225,35 @@ class Registry:
                              (int(active), self.clock(), business_id)):
             raise ValueError("No such business.")
         self.audit(actor, business_id, "business.resume" if active else "business.pause", {})
+
+    # --- email
+
+    def save_email(self, business_id: str, address: str, app_password: str, actor: str) -> None:
+        """The business's Gmail for staff emails; an empty app password keeps the saved one."""
+        address = (address or "").strip()
+        app_password = "".join((app_password or "").split())
+        if not is_email(address):
+            raise ValueError("Enter one Gmail address, like sweetbakes@gmail.com.")
+        if app_password and not (len(app_password) == 16 and app_password.isalpha()):
+            raise ValueError("The app password is the 16 letters Google shows (spaces don't matter), "
+                             "not your normal Gmail password.")
+        if self.business(business_id) is None:
+            raise ValueError("No such business.")
+        detail = {"address": address}
+        if app_password:
+            self.db.write("INSERT INTO email_accounts (business_id, address, app_password, updated_at)"
+                          " VALUES (?, ?, ?, ?) ON CONFLICT (business_id) DO UPDATE SET address = excluded.address,"
+                          " app_password = excluded.app_password, updated_at = excluded.updated_at",
+                          (business_id, address, self.vault.seal(app_password), self.clock()))
+            detail["app_password"] = "(changed)"
+        elif not self.db.write("UPDATE email_accounts SET address = ?, updated_at = ? WHERE business_id = ?",
+                               (address, self.clock(), business_id)):
+            raise ValueError("Enter the app password too.")
+        self.audit(actor, business_id, "email.save", detail)
+
+    def remove_email(self, business_id: str, actor: str) -> None:
+        if self.db.write("DELETE FROM email_accounts WHERE business_id = ?", (business_id,)):
+            self.audit(actor, business_id, "email.remove", {})
 
     # --- numbers
 

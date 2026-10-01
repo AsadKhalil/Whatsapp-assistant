@@ -137,3 +137,43 @@ def test_a_bad_or_repeated_number_imports_nothing(tmp_path, extras, message):
     with pytest.raises(ValueError, match=message):
         registry.import_yaml(str(path), Settings())
     assert registry.is_empty()
+
+
+def test_email_settings_are_sealed_audited_without_the_password_and_reach_the_client():
+    registry = registry_with_acme()
+    registry.save_email("acme", " shop@gmail.com ", "abcd efgh ijkl mnop", actor="t")
+    stored = registry.db.one("SELECT * FROM email_accounts WHERE business_id = 'acme'")
+    assert "abcd" not in stored["app_password"]
+    client = registry.clients()["acme"]
+    assert client.email_address == "shop@gmail.com" and client.email_app_password == "abcdefghijklmnop"
+    assert "abcdefghijklmnop" not in repr(client)
+    business = registry.business("acme")
+    assert business.email_address == "shop@gmail.com" and business.has_email_password
+    assert not business.email_unreadable
+    entry = registry.audit_log("acme")[0]
+    assert entry["action"] == "email.save" and "abcd" not in entry["detail"] and "(changed)" in entry["detail"]
+    registry.save_email("acme", "orders@gmail.com", "", actor="t")  # empty keeps the saved password
+    assert registry.clients()["acme"].email_app_password == "abcdefghijklmnop"
+    assert registry.clients()["acme"].email_address == "orders@gmail.com"
+    registry.remove_email("acme", actor="t")
+    assert registry.clients()["acme"].email_address == ""
+    assert registry.audit_log("acme")[0]["action"] == "email.remove"
+
+
+@pytest.mark.parametrize("address, password, message", [
+    ("not-an-email", "abcdefghijklmnop", "Gmail address"),
+    ("a@gmail.com, b@gmail.com", "abcdefghijklmnop", "Gmail address"),
+    ("shop@gmail.com", "hunter2hunter2", "16 letters"),
+    ("shop@gmail.com", "", "app password too"),
+])
+def test_bad_email_settings_are_refused(address, password, message):
+    with pytest.raises(ValueError, match=message):
+        registry_with_acme().save_email("acme", address, password, actor="t")
+
+
+def test_an_unreadable_app_password_switches_email_off():
+    registry = registry_with_acme()
+    registry.save_email("acme", "shop@gmail.com", "abcdefghijklmnop", actor="t")
+    reopened = Registry(registry.db, Vault("another-key"))
+    assert reopened.clients()["acme"].email_address == ""
+    assert reopened.business("acme").email_unreadable
