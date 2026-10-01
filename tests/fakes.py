@@ -278,3 +278,17 @@ def registry_with_acme(meta: bool = True) -> Registry:
     registry.add_number("acme", "", actor="test")
     registry.assign_number("acme", "acme", actor="test")
     return registry
+
+
+class FakeMailer:
+    """Records emails instead of sending them; set `fail` to a MailError to make sending fail."""
+
+    def __init__(self) -> None:
+        self.sent: list[dict] = []
+        self.fail: Exception | None = None
+
+    def send(self, address: str, app_password: str, sender_name: str, to: str, subject: str, body: str) -> None:
+        if self.fail is not None:
+            raise self.fail
+        self.sent.append({"address": address, "app_password": app_password, "sender_name": sender_name,
+                          "to": to, "subject": subject, "body": body})
