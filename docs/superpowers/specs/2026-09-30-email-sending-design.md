@@ -76,7 +76,7 @@ Sending lives in its own small module (`app/mailer.py`), so another way of sendi
   quotes, at most 254 characters. Anything else goes back to the AI as an error ("That isn't one email address")
   so it can ask the staff member.
 - `subject`: 1–200 characters after trimming; line breaks become spaces.
-- `body`: 1–5,000 characters after trimming.
+- `body`: 1–3,500 characters after trimming, so the preview fits in one WhatsApp message (4,096 characters).
 - **Daily cap:** at most 50 emails sent per business in any 24 hours. Checked before the preview and again at
   send time; when reached: "This business has sent 50 emails in the last 24 hours. Try again later."
 
@@ -151,7 +151,7 @@ pytest, no network, as for the engine and dashboard:
   email.
 - Preview → YES sends once with the business's address and name; NO cancels; another sender's YES does nothing;
   an expired pending email does nothing; a failed send keeps the pending email.
-- Bad address, several addresses, too-long subject or text are refused before any preview.
+- Bad address, several addresses, a subject over 200 or text over 3,500 characters are refused before any preview.
 - The 51st email in 24 hours is refused.
 - `app/mailer.py` against a fake `smtplib.SMTP`: STARTTLS, login and send are called; each error maps to its reason.
 - Registry: the app password is sealed, never in the audit log or on a page; `clients()` fills the fields;

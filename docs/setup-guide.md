@@ -718,6 +718,33 @@ A business login sees only its own business: **Home** (both numbers' status, rep
 - **Other admins:** the **Admins** page (top menu) works the same way. Nobody can disable their own login.
 - **You're locked out, or lost your phone:** on the server run `docker compose exec engine python -m app.cli admin-link you@example.com` and open the link it prints.
 
+### Let staff send email (optional)
+
+Staff can ask the bot in WhatsApp to send an email from the business's own Gmail account, for example "email
+this month's expenses to accountant@example.com". The bot writes the email and shows it first:
+
+> 📧 Send this email?
+> To: accountant@example.com
+> Subject: September expenses
+> ...
+> Reply YES to send or NO to cancel.
+
+It sends only after the same staff member replies YES (within 10 minutes). Customers can't send email.
+
+To set it up, the business owner (or you) does this once:
+
+1. In the business's Gmail account, turn on **2-Step Verification** (Google Account → Security).
+2. Still in Security, open **App passwords**, create one named "WhatsApp assistant", and copy the 16 letters
+   Google shows. This is not the normal Gmail password.
+3. In the dashboard, open the business → **Email**, enter the Gmail address and the app password, and press
+   **Save**.
+4. Press **Send a test email**.
+   You should see: "Sent. Check the inbox of …", and the test email arrives in that Gmail inbox.
+
+Limits: one recipient per email, plain text only (no attachments), at most 50 emails per business a day. The
+request, the preview and the "✅ Email sent" reply stay in the business's **Chats**, as the record of what was
+sent. **Remove email** on the same page switches it off.
+
 ### The Sheet page's safety checks
 
 - A tab can only get permissions if it exists in the Sheet. "See their own rows" needs an owner column (the column holding the customer's phone number), and the columns picked for the customer's name and phone must be real columns of that tab.
@@ -780,6 +807,7 @@ If you ran the engine before the dashboard existed:
 - **Read a client's chats:** open the business → **Chats**.
 - **A client stopped paying:** open the business → **Pause business** (Part K). Nothing is deleted.
 - **Reset a login or remove someone's access:** Part K, "Logins: reset a password or remove access".
+- **Let staff send email:** Part K, "Let staff send email (optional)".
 - **Update to a new version of the code:** on the server, during quiet hours (a restart drops any message
   that was received but not yet answered — there's no queue):
   ```bash
@@ -845,6 +873,9 @@ If you ran the engine before the dashboard existed:
 - **A number shows `UNREACHABLE` on the Numbers page.** Either it isn't linked yet (open it and press
   **Relink**), or WAHA itself is down: on the server, `docker compose ps` should list `waha` as running, and
   `docker compose logs waha` shows why it isn't.
+- **"Gmail refused the email address or app password".** The app password is wrong or was deleted, or 2-Step
+  Verification was turned off. Make a new app password (Part K, "Let staff send email") and save it on the
+  business's **Email** page. A Google Workspace account whose admin has turned app passwords off can't use this.
 
 ## 16. Glossary
 
@@ -882,6 +913,8 @@ If you ran the engine before the dashboard existed:
   phone, so a stolen password alone isn't enough.
 - **`SECRET_KEY`:** the random value in `.env` that locks the Meta keys and two-step logins saved in the
   dashboard's database. Keep a copy, and never change it.
+- **App password:** a 16-letter password Google creates for one app, so it can use a Gmail account without the
+  account's real password. It needs 2-Step Verification, and you can delete it any time in the Google account.
 - **QR linking:** connecting a phone number to WAHA by scanning a QR code with WhatsApp's own
   Linked Devices feature — the same mechanism as linking WhatsApp Web.
 - **Group id (`…@g.us`):** WAHA's identifier for one WhatsApp group chat.

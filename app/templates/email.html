@@ -1,0 +1,54 @@
+{% extends "base.html" %}
+{% block content %}
+<h1>Email</h1>
+<p class="muted lede">Staff can ask the assistant in WhatsApp to send an email, for example "email this month's
+  expenses to our accountant". It shows the email first and sends it from this Gmail account only after they reply
+  YES. Customers can't send email.</p>
+{% if business.email_unreadable %}<p class="notice error">The saved app password can't be read (was SECRET_KEY changed?). Enter it again.</p>{% endif %}
+{% if notice %}<p class="notice ok" role="status">{{ notice }}</p>{% endif %}
+
+<section class="setup-phase">
+  <header class="phase-head"><span class="phase-tag">Gmail</span><h2>Connect the business's Gmail</h2></header>
+  <ol class="steps">
+    <li>
+      <div class="step-body"><strong>Turn on 2-Step Verification</strong>
+        <p>In the Gmail account: Google Account → Security → 2-Step Verification. App passwords need it.</p></div>
+    </li>
+    <li>
+      <div class="step-body"><strong>Create an app password</strong>
+        <p>Google Account → Security → <em>App passwords</em>. Name it "WhatsApp assistant" and copy the 16 letters
+          Google shows. It is not the normal Gmail password.</p></div>
+    </li>
+    <li>
+      <div class="step-body"><strong>Paste both here and save</strong>
+        <p>Then press <em>Send a test email</em>: it goes to this Gmail address.</p></div>
+    </li>
+  </ol>
+  <form method="post">
+    <input type="hidden" name="csrf" value="{{ csrf }}">
+    <label>Gmail address <input type="email" name="address" value="{{ address }}" required autocomplete="off"></label>
+    <label>App password {% if business.has_email_password %}<small>(saved; leave empty to keep it)</small>{% endif %}
+      <input type="password" name="app_password" autocomplete="new-password" aria-describedby="app-password-help"
+             {%- if not business.has_email_password %} required{% endif %}></label>
+    <small id="app-password-help">The 16 letters Google shows, with or without the spaces.</small>
+    <div class="grid">
+      <button type="submit" name="action" value="save">Save</button>
+      {% if business.email_address and business.has_email_password %}
+      <button type="submit" name="action" value="test" class="secondary" formnovalidate>Send a test email</button>
+      {% endif %}
+    </div>
+  </form>
+</section>
+
+{% if business.email_address %}
+<section class="danger-zone">
+  <h2>Remove email</h2>
+  <p class="muted">The assistant stops offering to send email for this business. Nothing else changes.</p>
+  <form method="post">
+    <input type="hidden" name="csrf" value="{{ csrf }}">
+    <button type="submit" name="action" value="remove" class="danger"
+            data-confirm="Remove email for {{ business.config.business }}? Staff can't send email from WhatsApp after this.">Remove email</button>
+  </form>
+</section>
+{% endif %}
+{% endblock %}

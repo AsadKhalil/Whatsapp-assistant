@@ -6,6 +6,7 @@ A WhatsApp AI assistant for small businesses, run for many businesses from one s
 - **Answers** come from the business's Google Sheet. Customers' new rows are added only after they reply YES;
   staff rows are saved at once.
 - **Voice notes** are transcribed.
+- **Email:** staff can ask the bot to email someone from the business's Gmail; it shows the email and sends it only after they reply YES (set up on the business's **Email** page).
 
 Design: `docs/superpowers/specs/2026-09-23-whatsapp-engine-design.md` (engine) and `docs/superpowers/specs/2026-09-28-dashboard-admin-design.md` (dashboard).
 

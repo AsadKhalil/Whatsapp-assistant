@@ -12,6 +12,7 @@ from fastapi.responses import Response
 
 from app.auth import Session
 from app.config import client_from_dict, digits
+from app.mailer import MailError
 from app.registry import Business
 from app.sheet_rules import sensitive_columns, tab_problems
 from app.sheets import service_account_email, sheet_error
@@ -250,3 +251,39 @@ def sheet_page(request: Request, scope: Scope, form: Form | None) -> Response:
     return page(request, scope, "sheet.html", title="Sheet & permissions", config=config, email=email,
                 sheet_tabs=sheet_tabs, sheet_problem=sheet_problem, error=error, preview=preview, problems=problems,
                 sensitive={tab: sensitive_columns(headers) for tab, headers in sheet_tabs.items()})
+
+
+@screen("/email", ("GET", "POST"))
+def email_page(request: Request, scope: Scope, form: Form | None) -> Response:
+    """The business's Gmail for staff emails: save it, remove it, or send a test email to itself."""
+    state, business = request.app.state, scope.business
+    error, notice, address = "", "", business.email_address
+    if form is not None:
+        action, actor = form.get("action"), str(scope.session.user.id)
+        if action == "test":
+            client = state.registry.clients(include_paused=True).get(business.id)
+            if client is None or not client.email_address:
+                error = "Save the Gmail address and app password first."
+            else:
+                try:
+                    state.bot.mailer.send(client.email_address, client.email_app_password, client.business,
+                                          client.email_address, "Email is set up",
+                                          f"Email is set up for {client.business}. Staff can now ask the WhatsApp "
+                                          "assistant to send emails.")
+                except MailError as e:
+                    error = f"The test email wasn't sent: {e}."
+                else:
+                    notice = f"Sent. Check the inbox of {client.email_address}."
+        else:
+            address = form.get("address")
+            try:
+                if action == "remove":
+                    state.registry.remove_email(business.id, actor=actor)
+                else:
+                    state.registry.save_email(business.id, address, form.raw("app_password"), actor=actor)
+            except ValueError as e:
+                error = str(e)
+            else:
+                state.reload()
+                return redirect(f"{scope.base}/email?ok={'email_removed' if action == 'remove' else 'saved'}")
+    return page(request, scope, "email.html", title="Email", error=error, notice=notice, address=address)

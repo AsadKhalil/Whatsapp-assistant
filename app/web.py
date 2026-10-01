@@ -33,6 +33,7 @@ OK_MESSAGES = {
     "resumed": "Business resumed.",
     "assigned": "Group number updated.",
     "deleted": "Number deleted.",
+    "email_removed": "Email removed: the bot no longer sends email for this business.",
 }
 SECURITY_HEADERS = {
     "Content-Security-Policy": "default-src 'self'; img-src 'self' data:; frame-ancestors 'none'; form-action 'self'",
