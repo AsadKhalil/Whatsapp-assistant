@@ -114,8 +114,10 @@ class ScriptedLLM:
         self.transcript = transcript
         self.fail = fail
         self.calls: list[list] = []
+        self.tools: list[list[str]] = []  # the tool names offered on each call
 
     def complete(self, messages: list, tools: list[dict]) -> ModelReply:
+        self.tools.append([t["function"]["name"] for t in tools])
         self.calls.append(list(messages))
         if self.fail:
             raise RuntimeError("model is down")
@@ -240,7 +242,8 @@ def incoming(text: str = "hi", *, msg_id: str | None = None, group: str | None =
 def make_bot(*replies: ModelReply, clock=lambda: 1_790_000_000.0, **llm_options):
     client = make_client()
     llm = ScriptedLLM(*replies, **llm_options)
-    bot = Bot(Store(":memory:"), bakery_sheets(), llm, FakeMeta(), FakeWaha(), {client.id: client}, clock=clock)
+    bot = Bot(Store(":memory:"), bakery_sheets(), llm, FakeMeta(), FakeWaha(), {client.id: client}, clock=clock,
+              mailer=FakeMailer())
     return bot, llm
 
 

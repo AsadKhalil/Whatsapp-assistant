@@ -30,6 +30,19 @@ CREATE TABLE IF NOT EXISTS pending_writes (
   expires_at REAL NOT NULL,
   PRIMARY KEY (client_id, chat_id, sender_id)
 );
+CREATE TABLE IF NOT EXISTS pending_emails (
+  client_id TEXT NOT NULL,
+  chat_id TEXT NOT NULL,
+  sender_id TEXT NOT NULL,
+  email_json TEXT NOT NULL,
+  expires_at REAL NOT NULL,
+  PRIMARY KEY (client_id, chat_id, sender_id)
+);
+CREATE TABLE IF NOT EXISTS emails_sent (
+  client_id TEXT NOT NULL,
+  at REAL NOT NULL
+);
+CREATE INDEX IF NOT EXISTS emails_sent_by_client ON emails_sent (client_id, at);
 """
 
 
@@ -112,7 +125,31 @@ class Store:
         self._write("DELETE FROM pending_writes WHERE client_id = ? AND chat_id = ? AND sender_id = ?",
                     (client_id, chat_id, sender_id))
 
+    def put_pending_email(self, client_id: str, chat_id: str, sender_id: str, email: dict[str, str],
+                          expires_at: float) -> None:
+        self._write("INSERT OR REPLACE INTO pending_emails VALUES (?, ?, ?, ?, ?)",
+                    (client_id, chat_id, sender_id, json.dumps(email, ensure_ascii=False), expires_at))
+
+    def get_pending_email(self, client_id: str, chat_id: str, sender_id: str, now: float) -> dict[str, str] | None:
+        rows = self._all("SELECT email_json FROM pending_emails WHERE client_id = ? AND chat_id = ? AND sender_id = ?"
+                         " AND expires_at > ?", (client_id, chat_id, sender_id, now))
+        return json.loads(rows[0]["email_json"]) if rows else None
+
+    def drop_pending_email(self, client_id: str, chat_id: str, sender_id: str) -> None:
+        self._write("DELETE FROM pending_emails WHERE client_id = ? AND chat_id = ? AND sender_id = ?",
+                    (client_id, chat_id, sender_id))
+
+    def record_email_sent(self, client_id: str, at: float) -> None:
+        self._write("INSERT INTO emails_sent (client_id, at) VALUES (?, ?)", (client_id, at))
+
+    def emails_sent_since(self, client_id: str, since: float) -> int:
+        return self._all("SELECT COUNT(*) AS n FROM emails_sent WHERE client_id = ? AND at >= ?",
+                         (client_id, since))[0]["n"]
+
     def purge_expired_pending(self, now: float) -> int:
+        """Drop pending rows and emails nobody confirmed, and email counts older than two days."""
+        self._write("DELETE FROM pending_emails WHERE expires_at <= ?", (now,))
+        self._write("DELETE FROM emails_sent WHERE at < ?", (now - 2 * 86_400,))
         return self._write("DELETE FROM pending_writes WHERE expires_at <= ?", (now,))
 
     def delete_older_than(self, client_id: str, cutoff: float) -> int:

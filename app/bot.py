@@ -14,8 +14,9 @@ from datetime import datetime
 from zoneinfo import ZoneInfo
 
 from app.config import Client, digits
-from app.tools import (TOOL_SPECS, TOTAL_ARGS, Caller, build_row, describe_tabs, lookup_rows, proposal_text,
-                       saved_text, total_rows)
+from app.mailer import MailError
+from app.tools import (SEND_EMAIL_SPEC, TOOL_SPECS, TOTAL_ARGS, Caller, build_row, describe_tabs, email_preview,
+                       email_request, lookup_rows, proposal_text, saved_text, total_rows)
 from app.whatsapp import Incoming, SendError
 
 log = logging.getLogger("bot")
@@ -28,6 +29,8 @@ DAY = 86_400
 MAX_TEXT = 4000  # WhatsApp rejects text bodies over 4096 characters
 FALLBACK = "Sorry, I'm having trouble right now. The team will get back to you."
 PENDING_TTL = 600  # seconds a proposed Sheet row waits for YES
+EMAIL_DAILY_LIMIT = 50  # emails per business per rolling 24h (Gmail allows about 500)
+EMAIL_LIMIT_TEXT = f"This business has sent {EMAIL_DAILY_LIMIT} emails in the last 24 hours. Try again later."
 # "ok"/"okay" are deliberately absent: people say them as acknowledgement, not confirmation.
 YES = {"yes", "y", "yep", "yes please", "confirm", "haan", "han", "ji", "jee", "ہاں", "جی", "نعم", "👍"}
 NO = {"no", "n", "nope", "cancel", "nahi", "nahin", "نہیں", "لا", "👎"}
@@ -63,10 +66,11 @@ def intro(client: Client, is_group: bool) -> str:
 
 class Bot:
     def __init__(self, store, sheets, llm, meta, waha, clients: dict[str, Client], log_key: str = "",
-                 clock=time.time) -> None:
+                 clock=time.time, mailer=None) -> None:
         self.store, self.sheets, self.llm, self.meta, self.waha = store, sheets, llm, meta, waha
         self.clients = clients
         self.clock = clock
+        self.mailer = mailer  # sends staff emails; None switches email off
         self._log_key = log_key.encode()
         self._chat_locks: defaultdict[str, threading.Lock] = defaultdict(threading.Lock)
 
@@ -142,15 +146,19 @@ class Bot:
         return True
 
     def _answer_pending(self, client: Client, m: Incoming, now: float) -> bool:
-        """YES saves the sender's proposed row and NO drops it; only the customer who proposed it can answer."""
+        """YES/NO answers this sender's pending email or proposed row; only the person who asked can answer."""
         word = normalize(m.text)
         if word not in YES and word not in NO:
             return False
-        pending = self.store.get_pending(client.id, m.chat_id, m.sender_id, now)
-        if pending is None:
+        email = self.store.get_pending_email(client.id, m.chat_id, m.sender_id, now)
+        pending = None if email else self.store.get_pending(client.id, m.chat_id, m.sender_id, now)
+        if email is None and pending is None:
             return False
         if not self._reply_allowed(client, m, now):
             return True  # can't confirm it, so don't act on it yet
+        if email is not None:
+            self._answer_email(client, m, word in YES, email, now)
+            return True
         if word in NO:
             self.store.drop_pending(client.id, m.chat_id, m.sender_id)
             self._send(client, m, "Cancelled, nothing was saved.")
@@ -166,8 +174,53 @@ class Bot:
         self._send(client, m, f"✅ Added to {tab}.")
         return True
 
+    def _answer_email(self, client: Client, m: Incoming, yes: bool, email: dict[str, str], now: float) -> None:
+        """Send the previewed email on YES; if Gmail fails, keep it so another YES can retry."""
+        if not yes:
+            self.store.drop_pending_email(client.id, m.chat_id, m.sender_id)
+            self._send(client, m, "Cancelled, nothing was sent.")
+            return
+        if not self._can_email(client, self._caller(client, m)):
+            self.store.drop_pending_email(client.id, m.chat_id, m.sender_id)
+            self._send(client, m, "Email isn't set up for this business any more, so nothing was sent.")
+            return
+        if self.store.emails_sent_since(client.id, now - DAY) >= EMAIL_DAILY_LIMIT:
+            self._send(client, m, EMAIL_LIMIT_TEXT)
+            return
+        try:
+            self.mailer.send(client.email_address, client.email_app_password, client.business,
+                             email["to"], email["subject"], email["body"])
+        except MailError as e:
+            log.warning("email_failed client=%s error=%s", client.id, e.kind)  # never the address or text
+            self._send(client, m, f"Couldn't send the email: {e}. Fix it and reply YES to try again.")
+            return
+        self.store.record_email_sent(client.id, now)
+        self.store.drop_pending_email(client.id, m.chat_id, m.sender_id)
+        log.info("email_sent client=%s", client.id)
+        self._send(client, m, f"✅ Email sent to {email['to']}.")
+
     def _caller(self, client: Client, m: Incoming) -> Caller:
         return Caller(role_for(client, m), m.is_group, m.sender_name, m.sender_phone)
+
+    def _can_email(self, client: Client, caller: Caller) -> bool:
+        """Only staff, and only when the business has its Gmail set up."""
+        return (caller.role == "staff" and self.mailer is not None
+                and bool(client.email_address and client.email_app_password))
+
+    def _tools(self, client: Client, caller: Caller) -> list[dict]:
+        return [*TOOL_SPECS, SEND_EMAIL_SPEC] if self._can_email(client, caller) else TOOL_SPECS
+
+    def _propose_email(self, client: Client, m: Incoming, caller: Caller, args: dict, now: float) -> dict | Final:
+        """Check the email and show it; it is only sent when the same staff member replies YES."""
+        if not self._can_email(client, caller):
+            return {"error": "Sending email isn't available here."}
+        if self.store.emails_sent_since(client.id, now - DAY) >= EMAIL_DAILY_LIMIT:
+            return {"error": EMAIL_LIMIT_TEXT}
+        result = email_request(args)
+        if "error" in result:
+            return result
+        self.store.put_pending_email(client.id, m.chat_id, m.sender_id, result["email"], now + PENDING_TTL)
+        return Final(email_preview(result["email"]))
 
     def _addressed(self, m: Incoming) -> bool:
         if not m.is_group:
@@ -178,9 +231,10 @@ class Bot:
     def _think(self, client: Client, m: Incoming, caller: Caller, now: float) -> str:
         messages = [{"role": "system", "content": self._system_prompt(client, m, caller, now)},
                     *self._history(client, m)]
+        tools = self._tools(client, caller)
         for _ in range(MAX_MODEL_CALLS):
             try:
-                reply = self.llm.complete(messages, TOOL_SPECS)
+                reply = self.llm.complete(messages, tools)
             except Exception:
                 log.exception("model_failed client=%s", client.id)
                 self._handoff(client, m, "The assistant had an error.", now)
@@ -196,8 +250,8 @@ class Bot:
                 result = self._run_tool(client, m, caller, tool_call.name, tool_call.arguments, now)
                 if isinstance(result, Final):
                     finals.append(result.text)
-                    if caller.role != "staff":
-                        break  # one proposal per customer turn: a second would replace the pending one
+                    if caller.role != "staff" or tool_call.name == "send_email":
+                        break  # one proposal per customer turn, one email preview per turn
                 else:
                     results.append((tool_call, result))
             if finals:  # a code-composed reply ends the turn; failed staff saves are listed, never dropped
@@ -215,6 +269,8 @@ class Bot:
         tab = str(args.get("tab") or "")
         tab = next((t for t in client.tabs if t.lower() == tab.lower()), tab)
         try:
+            if name == "send_email":
+                return self._propose_email(client, m, caller, args, now)
             if name == "lookup_rows":
                 return lookup_rows(self.sheets, client, caller, tab, str(args.get("query") or ""))
             if name == "total_rows":
@@ -253,6 +309,14 @@ class Bot:
             pending_rule = (f"- This customer has an unconfirmed proposal for {tab}. Their YES or NO confirms "
                             "or cancels it, so don't ask other yes/no questions; to change it, call propose_row "
                             "again with the whole row.\n")
+        if self._can_email(client, caller):
+            email_rule = ("- To email someone for a staff member, call send_email with the whole email. Never say "
+                          "an email was sent; the system shows it and asks them to reply YES.\n")
+            if self.store.get_pending_email(client.id, m.chat_id, m.sender_id, now):
+                email_rule += ("- This staff member has an email waiting for their YES or NO, so don't ask other "
+                               "yes/no questions; to change it, call send_email again with the whole email.\n")
+        else:
+            email_rule = "- You can't send email from this chat; if asked, say so.\n"
         return (
             f"You are {client.bot_name}, the AI assistant of {client.business}, chatting in {where}. "
             f"You are talking to {who}.\n"
@@ -272,6 +336,7 @@ class Bot:
             "- To save an order, lead, booking or expense, call propose_row. Never say anything is saved; "
             "the system confirms it.\n"
             f"{pending_rule}"
+            f"{email_rule}"
             "- Write dates as YYYY-MM-DD.\n"
             f"- Current time: {local:%A %d %B %Y %H:%M} ({client.timezone}).\n\n"
             f"Sheet tabs you can use:\n{describe_tabs(client, caller, self.sheets) or '(none)'}\n\n"

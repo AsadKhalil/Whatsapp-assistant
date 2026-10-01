@@ -7,6 +7,7 @@ from datetime import date, datetime
 from typing import Literal
 
 from app.config import Client, same_phone
+from app.mailer import is_email
 
 Role = Literal["staff", "customer"]
 MAX_ROWS = 20
@@ -70,6 +71,41 @@ TOOL_SPECS: list[dict] = [
         }, "required": ["reason"]},
     }},
 ]
+
+# Offered only to staff of a business with email set up (see Bot._tools).
+SEND_EMAIL_SPEC: dict = {"type": "function", "function": {
+    "name": "send_email",
+    "description": "Email one person for a staff member, from the business's Gmail. Write the whole email. The "
+                   "system shows it to the staff member and sends it only after they reply YES; never say it was "
+                   "sent yourself.",
+    "parameters": {"type": "object", "properties": {
+        "to": {"type": "string", "description": "One email address, exactly as the staff member gave it."},
+        "subject": {"type": "string", "description": "A short subject line."},
+        "body": {"type": "string", "description": "The email text, plain text, signed with the business name."},
+    }, "required": ["to", "subject", "body"]},
+}}
+MAX_SUBJECT = 200
+MAX_BODY = 3500  # the preview must fit in one WhatsApp message (4096 characters)
+
+
+def email_request(args: dict) -> dict:
+    """Check send_email's arguments: {"email": {...}} ready to preview, or {"error": ...} for the model."""
+    to = str(args.get("to") or "").strip()
+    subject = " ".join(str(args.get("subject") or "").split())  # one line: no line breaks in a header
+    body = str(args.get("body") or "").strip()
+    if not is_email(to):
+        return {"error": "That isn't one email address. Ask the staff member for a single address like "
+                         "name@example.com."}
+    if not subject or len(subject) > MAX_SUBJECT:
+        return {"error": f"The subject must be 1 to {MAX_SUBJECT} characters."}
+    if not body or len(body) > MAX_BODY:
+        return {"error": f"The email text must be 1 to {MAX_BODY} characters."}
+    return {"email": {"to": to, "subject": subject, "body": body}}
+
+
+def email_preview(email: dict[str, str]) -> str:
+    return (f"📧 Send this email?\nTo: {email['to']}\nSubject: {email['subject']}\n\n{email['body']}\n\n"
+            "Reply YES to send or NO to cancel.")
 
 
 def can(client: Client, caller: Caller, tab: str, action: str) -> bool:

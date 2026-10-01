@@ -90,3 +90,15 @@ def test_replies_since_counts_bot_messages_per_channel():
     s.save_message("acme", "meta", "4", "c", "u", "Ali", "d", False, 100.0)
     assert s.replies_since("acme", 50.0) == {"meta": 1, "waha": 1}
     assert s.replies_since("other", 0.0) == {"meta": 0, "waha": 0}
+
+
+def test_maintenance_forgets_expired_pending_emails_and_old_email_counts():
+    s = Store(":memory:")
+    s.put_pending_email("acme", "c", "u", {"to": "a@b.co"}, expires_at=100.0)
+    assert s.get_pending_email("acme", "c", "u", now=50.0) == {"to": "a@b.co"}
+    assert s.get_pending_email("acme", "c", "u", now=150.0) is None  # expired
+    s.record_email_sent("acme", at=0.0)
+    s.record_email_sent("acme", at=200_000.0)
+    s.purge_expired_pending(now=200_000.0)
+    assert s.get_pending_email("acme", "c", "u", now=50.0) is None  # gone from the table
+    assert s.emails_sent_since("acme", 0.0) == 1  # counts older than two days are dropped

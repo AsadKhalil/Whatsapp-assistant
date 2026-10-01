@@ -20,6 +20,7 @@ from app.bot import Bot
 from app.config import Client, Settings
 from app.db import Db
 from app.llm import LLM
+from app.mailer import Mailer
 from app.registry import Registry
 from app.sheets import Sheets
 from app.store import Store
@@ -43,6 +44,7 @@ def build_bot(settings: Settings, clients: dict[str, Client]) -> Bot:
         waha=WahaClient(settings, http),
         clients=clients,
         log_key=settings.log_hash_key,
+        mailer=Mailer(),
     )
 
 
