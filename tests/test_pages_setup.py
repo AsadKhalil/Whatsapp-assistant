@@ -1,4 +1,5 @@
 import json
+import re
 
 import app.guided_setup
 from app.guided_setup import draft_from_args
@@ -24,7 +25,8 @@ def posted(draft: dict, token: str, action: str, **extra) -> dict:
     data = {"csrf": token, "action": action, "tab_count": str(len(draft["tabs"])),
             "row_count": str(len(draft["knowledge"])),
             **{key: draft[key] for key in ("bot_name", "personality", "instructions")},
-            **{f"replace_{key}": "on" for key, ticked in draft["replace"].items() if ticked}}
+            **{f"replace_{key}": "on" for key, ticked in draft["replace"].items() if ticked},
+            **{f"basis_{key}": value for key, value in draft["basis"].items()}}
     for i, tab in enumerate(draft["tabs"]):
         data.update({f"name{i}": tab["name"], f"purpose{i}": tab["purpose"], f"columns{i}": ", ".join(tab["columns"]),
                      f"owner{i}": tab["owner_column"], **{f"{access}{i}": "on" for access in tab["customer"]},
@@ -112,12 +114,12 @@ def test_asking_for_a_change_sends_the_hand_edited_draft_and_back_to_chat_keeps_
 
 def test_the_daily_cap_counts_retries_and_start_over_doesnt_reset_it(monkeypatch):
     monkeypatch.setattr(app.guided_setup, "DAILY_CALLS", 2)
-    bad = {**SETUP_ARGS, "bot_name": ""}
+    bad = {**SETUP_ARGS, "tabs": [{**SETUP_ARGS["tabs"][0], "name": "Bookings/2026"}]}
     site = site_with(call("propose_setup", **bad), call("propose_setup", **bad))
     http = site.business_user()
     token = csrf(http, "/app/setup")
     http.post("/app/setup", data={"csrf": token, "action": "draft_now"})  # a failing draft and its retry: 2 calls
-    assert site.registry.setup("acme")["draft"]["bot_name"] == ""  # shown with its problems
+    assert site.registry.setup("acme")["draft"]["tabs"][0]["name"] == "Bookings/2026"  # shown with its problems
     http.post("/app/setup", data={"csrf": token, "action": "start_over"})
     page = http.post("/app/setup", data={"csrf": token, "action": "send", "text": "We bake cakes"}).text
     assert "the limit for today" in page and ">We bake cakes</textarea>" in page
@@ -174,3 +176,62 @@ def test_home_shows_the_setup_card_until_set_up_and_settings_links_to_it():
     site.registry.setup_applied("acme", actor="t", detail={})
     assert "Set up your assistant" not in http.get("/app").text
     assert "Set up your assistant" not in site_with().business_user().get("/app").text  # set up by hand: tabs saved
+
+
+def test_a_stale_replace_tick_never_overwrites_persona_text_saved_since():
+    site = site_with()
+    draft = stored_draft(site)  # Personality was empty then: Replace ticked
+    site.registry.save_config("acme", {"personality": "Formal and brief."}, actor="t")
+    http = site.business_user()
+    assert 'name="replace_personality">' in http.get("/app/setup").text  # shown unticked now
+    http.post("/app/setup", data=posted(draft, csrf(http, "/app/setup"), "apply"))  # a page loaded before: ticked
+    assert site.registry.business("acme").config["personality"] == "Formal and brief."
+
+
+def test_a_contact_column_for_a_tab_customers_read_asks_for_the_tick():
+    site = site_with()
+    prices = {"name": "Prices", "purpose": "", "columns": ["Item", "Price", "Supplier phone"], "customer": [],
+              "owner_column": "", "fill": {}, "use": True, "confirmed": False}
+    draft = {**draft_from_args(SETUP_ARGS, acme_config()), "tabs": [prices]}
+    site.registry.save_setup("acme", [], draft)
+    http = site.business_user()
+    token = csrf(http, "/app/setup")
+    card = http.get("/app/setup").text.split('id="tab-0"', 1)[1].split("</article>", 1)[0]
+    assert 'name="confirm0"' in card and "Supplier phone" in card
+    assert "Fix the problems" in http.post("/app/setup", data=posted(draft, token, "apply")).text
+    assert site.bot.sheets.written == []
+    http.post("/app/setup", data=posted(draft, token, "apply", confirm0="on"))
+    assert ("add_columns", "Prices", ["Supplier phone"]) in site.bot.sheets.written
+
+
+def test_enter_in_a_draft_field_saves_and_leaving_the_draft_keeps_the_edits():
+    site = site_with()
+    stored_draft(site)
+    page = site.business_user().get("/app/setup").text
+    form = page.split('<form method="post">', 1)[1]
+    assert re.search(r'<button type="submit" name="action" value="(\w+)"', form).group(1) == "save"
+    assert "view=chat" not in page  # the way to the chat is Back to chat, which saves the edits first
+
+
+def test_the_sheet_is_read_only_when_the_screen_needs_it():
+    site = site_with()
+    stored_draft(site)
+    http = site.business_user()
+    token = csrf(http, "/app/setup")  # the draft view reads the tabs
+    assert site.bot.sheets.tab_reads == 1
+    http.get("/app/setup?view=chat")
+    for action in ("save", "back", "start_over"):
+        http.post("/app/setup", data={"csrf": token, "action": action, "tab_count": "0", "row_count": "0"},
+                  follow_redirects=False)
+    assert site.bot.sheets.tab_reads == 1
+
+
+def test_posted_text_is_cut_to_its_limits():
+    site = site_with()
+    http = site.business_user()
+    http.post("/app/setup", data={"csrf": csrf(http, "/app/setup"), "action": "save", "tab_count": "1",
+                                  "row_count": "1", "personality": "x" * 10_000, "columns0": "y" * 10_000,
+                                  "answer0": "z" * 10_000})
+    saved = site.registry.setup("acme")["draft"]
+    assert len(saved["personality"]) == 1501 and len(saved["knowledge"][0]["answer"]) == 1001
+    assert len(saved["tabs"][0]["columns"][0]) == 1000

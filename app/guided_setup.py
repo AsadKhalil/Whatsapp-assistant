@@ -85,9 +85,28 @@ def find_tab(name: str, names) -> str | None:
     return next((t for t in names if t.casefold() == name.casefold()), None)
 
 
+def saved_rule(name: str, config: dict) -> dict | None:
+    """The tab's saved permissions, or None when it has none; setup never changes them."""
+    tabs = config.get("tabs") or {}
+    found = find_tab(name, tabs)
+    return None if found is None else tabs[found] or {}
+
+
 def has_permissions(name: str, config: dict) -> bool:
-    """Whether the tab already has saved permissions; setup never changes those."""
-    return find_tab(name, config.get("tabs") or {}) is not None
+    return saved_rule(name, config) is not None
+
+
+def _spaced(text) -> str:
+    """Text compared ignoring spacing: browsers send line breaks as \\r\\n."""
+    return " ".join(str(text or "").split())
+
+
+def replace_ticks(draft: dict, config: dict) -> dict[str, bool]:
+    """Each Replace tick as it stands now. A tick made while other text was saved is reset (ticked only if nothing is
+    saved now), so it never overwrites what the owner saved after seeing the draft."""
+    basis = draft.get("basis") or {}
+    return {key: bool(draft["replace"].get(key)) if _spaced(basis.get(key)) == _spaced(config.get(key))
+            else not _spaced(config.get(key)) for key in PERSONA}
 
 
 def _spelled(name: str, columns: list[str]) -> str:
@@ -118,7 +137,8 @@ def draft_from_args(args: dict, config: dict) -> dict:
                  for row in (args.get("knowledge") if isinstance(args.get("knowledge"), list) else [])
                  if isinstance(row, dict)]
     return {**{key: _text(args.get(key)) for key in PERSONA},
-            "replace": {key: not str(config.get(key) or "").strip() for key in PERSONA},
+            "replace": {key: not _spaced(config.get(key)) for key in PERSONA},
+            "basis": {key: str(config.get(key) or "") for key in PERSONA},  # what each tick was decided against
             "tabs": tabs, "knowledge": [row for row in knowledge if row["question"] or row["answer"]]}
 
 
@@ -135,6 +155,11 @@ def tab_plan(name: str, columns: list[str], sheet_tabs: dict[str, list[str]]) ->
     have = {h.casefold() for h in current}
     add = [c for c in columns if c.casefold() not in have]
     return {"existing": existing, "add": add, "headers": current + add}
+
+
+def exposed_columns(saved: dict | None, plan: dict) -> list[str]:
+    """New contact-looking columns on a tab every customer can already read (its saved permissions stay)."""
+    return sensitive_columns(plan["add"]) if saved and "read" in (saved.get("customer") or []) else []
 
 
 def rule_of(tab: dict) -> dict:
@@ -155,7 +180,8 @@ def setup_changes(draft: dict, sheet_tabs: dict[str, list[str]], config: dict) -
         name = find_tab(tab["name"], sheet_tabs) or tab["name"]
         if tab["use"] and not has_permissions(name, config):
             added[name] = rule_of(tab)
-    changes: dict = {key: draft[key] for key in PERSONA if draft["replace"].get(key)}
+    ticks = replace_ticks(draft, config)
+    changes: dict = {key: draft[key] for key in PERSONA if ticks[key]}
     if added:
         changes["tabs"] = {**saved, **added}
     return changes
@@ -164,10 +190,11 @@ def setup_changes(draft: dict, sheet_tabs: dict[str, list[str]], config: dict) -
 def check_draft(draft: dict, sheet_tabs: dict[str, list[str]], config: dict) -> list[tuple[str, str]]:
     """What stops a draft being applied, as (where, message): where is "persona", "tab{i}", "row{i}" or ""."""
     problems: list[tuple[str, str]] = []
-    if not 1 <= len(draft["bot_name"]) <= LIMITS["bot_name"]:
+    ticks = replace_ticks(draft, config)  # a field that won't be saved can't stop Apply
+    if ticks["bot_name"] and not 1 <= len(draft["bot_name"]) <= LIMITS["bot_name"]:
         problems.append(("persona", f"Bot name: 1 to {LIMITS['bot_name']} characters."))
     for key in ("personality", "instructions"):
-        if len(draft[key]) > LIMITS[key]:
+        if ticks[key] and len(draft[key]) > LIMITS[key]:
             problems.append(("persona", f"{LABELS[key]}: at most {LIMITS[key]:,} characters."))
     used = [(i, tab) for i, tab in enumerate(draft["tabs"]) if tab["use"]]
     if len(used) > MAX_TABS:
@@ -177,28 +204,36 @@ def check_draft(draft: dict, sheet_tabs: dict[str, list[str]], config: dict) -> 
     for i, tab in used:
         name, columns, where = tab["name"], tab["columns"], f"tab{i}"
         label = name or f"Tab {i + 1}"
-        if not 1 <= len(name) <= 100:
+        plan = tab_plan(name, columns, sheet_tabs)
+        new = plan["existing"] is None  # an existing tab keeps its name and columns, whatever they are
+        if new and not 1 <= len(name) <= 100:
             problems.append((where, f"{label}: a tab name is 1 to 100 characters."))
-        if BAD_NAME_CHARACTERS & set(name):
+        if new and BAD_NAME_CHARACTERS & set(name):
             problems.append((where, f"{label}: a tab name can't contain [ ] * ? / \\ or :."))
         if name.casefold() in reserved:
             problems.append((where, f"{label}: that's the Knowledge or Handoffs tab, which setup adds by itself."))
         if name.casefold() in seen:
             problems.append((where, f"{label}: two tabs have this name."))
         seen.add(name.casefold())
-        if len(columns) > MAX_COLUMNS:
-            problems.append((where, f"{label}: at most {MAX_COLUMNS} columns."))
-        long = [c for c in columns if len(c) > 40]
+        added = columns if new else plan["add"]
+        if len(added) > MAX_COLUMNS:
+            problems.append((where, f"{label}: at most {MAX_COLUMNS} {'columns' if new else 'new columns'}."))
+        long = [c for c in added if len(c) > 40]
         if long:
             problems.append((where, f"{label}: column names are at most 40 characters ({', '.join(long)})."))
-        if len({c.casefold() for c in columns}) < len(columns):
+        if len({c.casefold() for c in added}) < len(added):
             problems.append((where, f"{label}: two columns have the same name."))
-        plan = tab_plan(name, columns, sheet_tabs)
-        if plan["existing"] is None and not columns:
+        if new and not columns:
             problems.append((where, f"{label}: a new tab needs at least one column."))
-        if not has_permissions(plan["existing"] or name, config):
+        saved = saved_rule(plan["existing"] or name, config)
+        exposed = exposed_columns(saved, plan)
+        if saved is None:
             problems += [(where, p) for p in tab_problems(plan["existing"] or name, rule_of(tab), plan["headers"],
                                                           confirmed=tab["confirmed"])]
+        elif exposed and not tab["confirmed"]:
+            problems.append((where, f"{label}: every customer can read this tab, so they would see "
+                                    f"{', '.join(exposed)}. Tick “I understand every customer can see these "
+                                    "columns” to add them."))
     kept = [(i, row) for i, row in enumerate(draft["knowledge"]) if row["keep"]]
     if len(kept) > MAX_ROWS:
         problems.append(("", f"At most {MAX_ROWS} Knowledge rows: remove some."))
@@ -257,8 +292,9 @@ def setup_prompt(config: dict, sheet_tabs: dict[str, list[str]] | None, draft: d
         f"The current settings:\n{current}"
     )
     if draft is not None:
+        shown = {key: value for key, value in draft.items() if key != "basis"}  # the settings are listed above
         text += ("\n\nThe current draft, which the owner may have edited by hand (\"use\": false means they "
-                 f"unticked a tab, \"keep\": false a Knowledge row):\n{json.dumps(draft, ensure_ascii=False)}")
+                 f"unticked a tab, \"keep\": false a Knowledge row):\n{json.dumps(shown, ensure_ascii=False)}")
         if problems:
             text += "\n\nProblems in it to fix:\n" + "\n".join(f"- {message}" for _, message in problems)
     return text
@@ -402,9 +438,10 @@ def draft_view(sheets, config: dict, draft: dict, sheet_tabs: dict[str, list[str
     plans = []
     for tab in draft["tabs"]:
         plan = tab_plan(tab["name"], tab["columns"], sheet_tabs)
-        plans.append({**plan, "configured": has_permissions(plan["existing"] or tab["name"], config),
-                      "sensitive": sensitive_columns(plan["headers"])})
-    return {"plans": plans,
+        saved = saved_rule(plan["existing"] or tab["name"], config)
+        plans.append({**plan, "configured": saved is not None, "sensitive": sensitive_columns(plan["headers"]),
+                      "exposed": exposed_columns(saved, plan)})
+    return {"plans": plans, "replace": replace_ticks(draft, config),
             "system": [{"name": name, **tab_plan(name, columns, sheet_tabs)} for name, columns in system_tabs(config)],
             "present": [same_question(row["question"]) in known for row in draft["knowledge"]],
             "problems": check_draft(draft, sheet_tabs, config)}

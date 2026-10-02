@@ -306,18 +306,24 @@ def _count(form: Form, name: str) -> int:
 
 
 def draft_from_form(form: Form) -> dict:
-    """The draft as posted from the Setup screen, hand edits included."""
+    """The draft as posted from the Setup screen, hand edits included.
+
+    Each field is cut one character past its limit: the checks still say what is too long, and a hand-made post
+    can't put more into the draft (and so into every later AI call) than the screen allows.
+    """
     tabs = []
     for i in range(_count(form, "tab_count")):
         rule = rule_from_form(form, i)
-        tabs.append({"name": form.get(f"name{i}"), "purpose": form.get(f"purpose{i}"),
-                     "columns": guided_setup.split_columns(form.get(f"columns{i}")), "customer": rule["customer"],
-                     "owner_column": rule.get("owner_column", ""), "fill": rule.get("fill", {}),
+        tabs.append({"name": form.get(f"name{i}")[:101], "purpose": form.get(f"purpose{i}")[:200],
+                     "columns": guided_setup.split_columns(form.get(f"columns{i}")[:1000]),
+                     "customer": rule["customer"], "owner_column": rule.get("owner_column", "")[:41],
+                     "fill": {column[:41]: source for column, source in rule.get("fill", {}).items()},
                      "use": form.has(f"use{i}"), "confirmed": form.has(f"confirm{i}")})
-    knowledge = [{"question": form.get(f"question{i}"), "answer": form.get(f"answer{i}"),
+    knowledge = [{"question": form.get(f"question{i}")[:201], "answer": form.get(f"answer{i}")[:1001],
                   "keep": not form.has(f"remove{i}")} for i in range(_count(form, "row_count"))]
-    return {**{key: form.get(key) for key in guided_setup.PERSONA},
+    return {**{key: form.get(key)[:limit + 1] for key, limit in guided_setup.LIMITS.items()},
             "replace": {key: form.has(f"replace_{key}") for key in guided_setup.PERSONA},
+            "basis": {key: form.get(f"basis_{key}")[:20_000] for key in guided_setup.PERSONA},
             "tabs": tabs, "knowledge": knowledge}
 
 
@@ -349,11 +355,6 @@ def setup_page(request: Request, scope: Scope, form: Form | None) -> Response:
     saved = registry.setup(business.id)
     messages, draft = saved["messages"], saved["draft"]
     email = service_account_email(state.settings.google_service_account_file)
-    sheet_tabs, sheet_problem = None, ""
-    try:
-        sheet_tabs = state.bot.sheets.tab_headers(config["sheet_id"])
-    except Exception as e:
-        sheet_problem = sheet_error(e, email)
     action = form.get("action") if form is not None else ""
     view = "chat" if request.query_params.get("view") == "chat" or draft is None else "draft"
     error, text, result = "", "", None
@@ -367,6 +368,14 @@ def setup_page(request: Request, scope: Scope, form: Form | None) -> Response:
             return redirect(f"{scope.base}/setup")
         if action == "back":
             return redirect(f"{scope.base}/setup?view=chat#reply")
+    sheet_tabs, sheet_problem = None, ""
+    # ponytail: one header read per tab, only for the draft screen, Apply and AI calls (the service account's read
+    # quota is shared with the live bot); a single batched read if that ever runs short.
+    if action or view == "draft":
+        try:
+            sheet_tabs = state.bot.sheets.tab_headers(config["sheet_id"])
+        except Exception as e:
+            sheet_problem = sheet_error(e, email)
     if action in ("send", "draft_now", "change"):
         owner_text = guided_setup.DRAFT_NOW if action == "draft_now" else form.get("text")
         text = "" if action == "draft_now" else owner_text

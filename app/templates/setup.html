@@ -17,7 +17,6 @@
 {% elif view == "draft" %}
 <p class="muted lede">Check the draft and change anything you like. Nothing in your Sheet or settings changes until
   you press <strong>Apply</strong>, and Apply only adds: it never deletes, renames or moves anything.</p>
-<p><a href="{{ base }}/setup?view=chat">See the conversation</a></p>
 {% if problems %}
 <div class="notice error"><p>Fix these before you apply:</p>
   <ul>{% for where, message in problems %}<li>{{ message }}</li>{% endfor %}</ul></div>
@@ -26,6 +25,10 @@
   <input type="hidden" name="csrf" value="{{ csrf }}">
   <input type="hidden" name="tab_count" value="{{ draft.tabs|length }}">
   <input type="hidden" name="row_count" value="{{ draft.knowledge|length }}">
+  {# The first button is what Enter in a field presses: it only saves. #}
+  <button type="submit" name="action" value="save" class="secondary">Save my changes</button>
+  <small>Saving also refreshes the column lists and the checks. <strong>Back to chat</strong>, below, keeps your
+    changes too.</small>
 
   <h2>How the bot sounds</h2>
   {% for where, message in problems if where == "persona" %}<p class="field-error">{{ message }}</p>{% endfor %}
@@ -40,7 +43,8 @@
         {% else %}<textarea name="{{ key }}" rows="{{ 3 if key == 'personality' else 6 }}" maxlength="{{ limits[key] }}">{{ draft[key] }}</textarea>{% endif %}
       </label>
     </div>
-    <label><input type="checkbox" name="replace_{{ key }}"{% if draft.replace[key] %} checked{% endif %}>
+    <input type="hidden" name="basis_{{ key }}" value="{{ config[key] or '' }}">
+    <label><input type="checkbox" name="replace_{{ key }}"{% if replace[key] %} checked{% endif %}>
       {% if config[key] %}Replace the current {{ label|lower }} with the suggestion{% else %}Save this {{ label|lower }}{% endif %}</label>
   </article>
   {% endfor %}
@@ -78,6 +82,11 @@
         <input name="columns{{ i }}" value="{{ tab.columns|join(', ') }}"></label>
       {% if plan.configured %}
       <p class="muted">Permissions stay as they are; change them on the <a href="{{ base }}/sheet">Sheet page</a>.</p>
+      {% if plan.exposed %}
+      <p class="notice warn">Every customer can read this tab, so they would see the new contact columns:
+        {{ plan.exposed|join(", ") }}.</p>
+      <label><input type="checkbox" name="confirm{{ i }}"{% if tab.confirmed %} checked{% endif %}> I understand every customer can see these columns</label>
+      {% endif %}
       {% else %}
       <p>Customers can (staff can always look up and add rows):</p>
       <label><input type="checkbox" name="read{{ i }}"{% if "read" in tab.customer %} checked{% endif %}> read all rows</label>

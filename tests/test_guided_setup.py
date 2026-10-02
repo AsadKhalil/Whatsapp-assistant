@@ -1,8 +1,13 @@
 import pytest
 
 from app.guided_setup import (AI_DOWN, DRAFT_NOW, MADE_DRAFT, REMINDER, SetupError, apply_sheet, check_draft,
-                              draft_from_args, setup_changes, summary, tab_plan, take_turn)
+                              draft_from_args, replace_ticks, setup_changes, summary, tab_plan, take_turn)
 from tests.fakes import SETUP_ARGS, FakeSheets, ScriptedLLM, acme_config, bakery_sheets, call, say
+
+# A proposal that always fails the checks: a new tab whose name Google refuses.
+BAD_ARGS = {**SETUP_ARGS, "tabs": [{**SETUP_ARGS["tabs"][0], "name": "Bookings/2026"}]}
+BAD_PROBLEM = ("tab0", "Bookings/2026: a tab name can't contain [ ] * ? / \\ or :.")
+TICKED = {"bot_name": True, "personality": True, "instructions": True}
 
 
 def sheet_tabs() -> dict[str, list[str]]:
@@ -35,7 +40,7 @@ def test_malformed_proposals_are_tidied_not_crashed_on():
                                                   "customer": [], "owner_column": "phone", "fill": {},
                                                   "use": True, "confirmed": False}]
     assert d["knowledge"] == [{"question": "Q?", "answer": "", "keep": True}]
-    assert {where for where, _ in check_draft(d, sheet_tabs(), acme_config())} == {"persona", "row0"}
+    assert {where for where, _ in check_draft(d, sheet_tabs(), acme_config())} == {"row0"}  # Bot name: not replaced
 
 
 def test_tab_names_follow_googles_rules_and_leave_out_the_knowledge_and_handoffs_tabs():
@@ -54,7 +59,7 @@ def test_caps_on_tabs_columns_rows_and_text():
     rows = [{"question": f"Q{i}?", "answer": "A", "keep": True} for i in range(61)]
     rows[0]["answer"] = "x" * 1001
     problems = check_draft(draft(tabs=tabs, knowledge=rows, bot_name="x" * 41, personality="x" * 1501,
-                                 instructions="x" * 4001), sheet_tabs(), acme_config())
+                                 instructions="x" * 4001, replace=TICKED), sheet_tabs(), acme_config())
     text = " ".join(message for _, message in problems)
     for expected in ("At most 10 tabs", "at most 20 columns", "at most 40 characters", "same name",
                      "At most 60 Knowledge rows", "at most 1,000", "Bot name: 1 to 40",
@@ -130,15 +135,13 @@ def test_a_proposal_is_checked_and_becomes_the_draft():
 
 
 def test_a_failing_draft_goes_back_once_then_is_shown_with_its_problems():
-    bad = {**SETUP_ARGS, "bot_name": ""}
-    llm, budget = ScriptedLLM(call("propose_setup", **bad), call("propose_setup", **bad)), Budget()
+    llm, budget = ScriptedLLM(call("propose_setup", **BAD_ARGS), call("propose_setup", **BAD_ARGS)), Budget()
     t = turn(llm, budget)
     feedback = llm.calls[1][-1]
-    assert feedback["role"] == "tool" and "Bot name: 1 to 40" in feedback["content"]
-    assert budget.used == 2 and t.draft["bot_name"] == ""
-    assert t.problems == [("persona", "Bot name: 1 to 40 characters.")]
-    fixed = turn(ScriptedLLM(call("propose_setup", **bad), call("propose_setup", **SETUP_ARGS)))
-    assert fixed.problems == [] and fixed.draft["bot_name"] == "Mia"
+    assert feedback["role"] == "tool" and "a tab name can't contain" in feedback["content"]
+    assert budget.used == 2 and t.draft["tabs"][0]["name"] == "Bookings/2026" and t.problems == [BAD_PROBLEM]
+    fixed = turn(ScriptedLLM(call("propose_setup", **BAD_ARGS), call("propose_setup", **SETUP_ARGS)))
+    assert fixed.problems == [] and fixed.draft["tabs"][0]["name"] == "Bookings"
 
 
 def test_a_draft_request_answered_in_text_gets_one_reminder():
@@ -150,11 +153,12 @@ def test_a_draft_request_answered_in_text_gets_one_reminder():
 
 
 def test_the_current_draft_and_its_problems_go_to_the_ai():
-    current = draft(bot_name="")
+    current = draft(tabs=[a_tab("Bad/Name")])
     llm = ScriptedLLM(call("propose_setup", **SETUP_ARGS))
     turn(llm, current=current, text="Make it formal", want_draft=True)
     system = llm.calls[0][0]["content"]
-    assert '"bot_name": ""' in system and "Bot name: 1 to 40 characters." in system
+    assert '"name": "Bad/Name"' in system and "Bad/Name: a tab name can't contain" in system
+    assert '"basis"' not in system  # the saved settings are listed once, above
 
 
 def test_ai_errors_and_the_daily_cap_change_nothing():
@@ -162,9 +166,43 @@ def test_ai_errors_and_the_daily_cap_change_nothing():
     with pytest.raises(SetupError, match=AI_DOWN):
         turn(ScriptedLLM(fail=True), budget)
     assert budget.used == 1  # a failed call counts too
-    bad = {**SETUP_ARGS, "bot_name": ""}
     with pytest.raises(SetupError, match="limit for today"):  # the retry is the second call
-        turn(ScriptedLLM(call("propose_setup", **bad), call("propose_setup", **SETUP_ARGS)), Budget(left=1))
+        turn(ScriptedLLM(call("propose_setup", **BAD_ARGS), call("propose_setup", **SETUP_ARGS)), Budget(left=1))
+
+
+def test_persona_is_checked_only_where_replace_is_ticked():
+    unticked = draft(bot_name="", instructions="x" * 4001)  # acme has both saved: Replace unticked
+    assert check_draft(unticked, sheet_tabs(), acme_config()) == []
+    ticked = {**unticked, "replace": TICKED}
+    assert [where for where, _ in check_draft(ticked, sheet_tabs(), acme_config())] == ["persona", "persona"]
+
+
+def test_a_replace_tick_made_against_other_saved_text_is_reset():
+    d = draft_from_args(SETUP_ARGS, acme_config())  # Personality empty then: ticked
+    assert d["basis"]["personality"] == "" and d["replace"]["personality"]
+    now = {**acme_config(), "personality": "Formal and brief."}
+    assert replace_ticks(d, now)["personality"] is False
+    assert "personality" not in setup_changes(d, sheet_tabs(), now)
+    seen = {**d, "basis": {**d["basis"], "personality": "Formal  and brief.\r\n"}}  # what the page showed
+    assert replace_ticks(seen, now)["personality"] is True  # a tick made while seeing it stands
+
+
+def test_existing_tabs_and_columns_are_not_held_to_the_rules_for_new_ones():
+    long = "Customer delivery address and landmark notes"  # 45 characters
+    tabs = {**sheet_tabs(), "Sales 2025/26": [f"C{i}" for i in range(24)] + [long]}
+    relisted = a_tab("Sales 2025/26", columns=[*tabs["Sales 2025/26"], "Status"])
+    assert check_draft(draft(tabs=[relisted]), tabs, acme_config()) == []
+    new = a_tab("Sales 2026/27", columns=relisted["columns"])
+    assert {where for where, _ in check_draft(draft(tabs=[new]), tabs, acme_config())} == {"tab0"}
+
+
+def test_a_contact_column_added_to_a_tab_customers_read_needs_the_tick():
+    prices = a_tab("Prices", columns=["Item", "Price", "Supplier phone"])  # acme's customers read Prices
+    refused = check_draft(draft(tabs=[prices]), sheet_tabs(), acme_config())
+    assert [where for where, _ in refused] == ["tab0"] and "Supplier phone" in refused[0][1]
+    assert check_draft(draft(tabs=[{**prices, "confirmed": True}]), sheet_tabs(), acme_config()) == []
+    orders = a_tab("Orders", columns=["Supplier phone"])  # customers see only their own Orders rows
+    assert check_draft(draft(tabs=[orders]), sheet_tabs(), acme_config()) == []
 
 
 def test_apply_adds_only_what_is_missing_and_skips_known_questions():

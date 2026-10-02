@@ -54,6 +54,7 @@ class FakeSheets:
         self.fail_tabs: Exception | None = None  # raised by tab_headers, like an unshared or deleted Sheet
         self.written: list[tuple] = []  # add_tab / add_columns / append_rows calls, in order
         self.fail_writes: set[str] = set()  # tabs whose writes raise Forbidden
+        self.tab_reads = 0  # tab_headers calls: each costs Google one read per tab
 
     def rows(self, sheet_id: str, tab: str) -> list[dict]:
         return [dict(r) for r in self.tabs[tab]]  # KeyError for a missing tab, like a renamed sheet
@@ -64,6 +65,7 @@ class FakeSheets:
         return list(self.tabs[tab][0]) if self.tabs.get(tab) else []
 
     def tab_headers(self, sheet_id: str) -> dict[str, list[str]]:
+        self.tab_reads += 1
         if self.fail_tabs:
             raise self.fail_tabs
         return {name: self.headers(sheet_id, name) for name in self.tabs}
