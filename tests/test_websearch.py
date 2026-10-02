@@ -105,3 +105,26 @@ def test_availability_follows_the_provider_and_key():
     assert not make_search(handler, llm_api_key="").available
     assert make_search(handler, llm_base_url="https://my-proxy.example/v1").search("q") == {
         "error": "Web search isn't available with this AI provider."}
+
+
+def test_openai_search_is_not_stored_reasons_lightly_and_is_not_retried():
+    bodies = []
+
+    def handler(request):
+        bodies.append(json.loads(request.content))
+        return httpx.Response(500, json={"error": {"message": "down"}})
+
+    make_search(handler).search("q")
+    assert len(bodies) == 1  # a slow or failed search isn't paid for twice
+    assert bodies[0]["store"] is False and bodies[0]["reasoning"] == {"effort": "low"}
+    make_search(handler, llm_reasoning_effort="high").search("q")
+    assert bodies[-1]["reasoning"] == {"effort": "high"}
+
+
+def test_the_provider_is_picked_by_host_name():
+    def handler(request):
+        raise AssertionError("no call expected")
+
+    assert make_search(handler, llm_base_url="https://api.openai.com/v1").provider == "openai"
+    assert make_search(handler, llm_base_url="https://llm.ollama.company.net/v1").provider == ""
+    assert make_search(handler, llm_base_url="https://evil.example/generativelanguage.googleapis.com/").provider == ""

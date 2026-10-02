@@ -26,6 +26,9 @@ allows it) for customers, using the AI provider's own search with the key the se
   "only help with this business" rule.
 - **Limits.** 2 searches per incoming message; 100 per business and 10 per customer chat per rolling 24 hours. Over
   a limit the tool returns an error and the bot answers without it or hands off.
+- **Web text can't act on its own.** After a search in a turn, a staff row waits for the staff member's YES (as a
+  customer's does), and no further search may follow a Sheet read in that turn (a search query could otherwise carry
+  Sheet data to a page named in the web text). Email already needs YES.
 - **Guided setup** does not search (out of scope).
 
 ## 3. How a search runs
@@ -63,4 +66,6 @@ returns `{"error": "Web search isn't available right now."}`.
   customers (owner choice); the provider's built-in search (owner choice).
 - A function tool whose code calls the provider's search, instead of moving the bot to the Responses API: keeps one
   tool loop for all three providers.
-- `MAX_MODEL_CALLS` stays 4: a message with two searches still has two calls left to answer.
+- `MAX_MODEL_CALLS` stays 4; a message that reads the Sheet and searches twice can run out of steps and hand off.
+- OpenAI searches are sent with `store=False`, low reasoning (or the configured low/medium/high) and no retry, with
+  a 60-second timeout; the provider is picked by the base URL's host name.

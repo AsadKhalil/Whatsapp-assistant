@@ -264,7 +264,7 @@ class Bot:
         messages = [{"role": "system", "content": self._system_prompt(client, m, caller, now)},
                     *self._history(client, m)]
         tools = self._tools(client, caller)
-        searches = 0
+        searches, read_sheet = 0, False
         for _ in range(MAX_MODEL_CALLS):
             try:
                 reply = self.llm.complete(messages, tools)
@@ -284,16 +284,21 @@ class Bot:
                     result = {"error": "Only one email at a time: ask for the next one after this one is answered."}
                 elif tool_call.name == "web_search" and searches >= WEB_PER_MESSAGE:
                     result = {"error": f"Only {WEB_PER_MESSAGE} web searches per message: answer with what you found."}
+                elif tool_call.name == "web_search" and searches and read_sheet:
+                    # web text could carry instructions to send Sheet data out in a second search query
+                    result = {"error": "No more web searches after reading the Sheet: answer with what you found."}
                 else:
                     searches += tool_call.name == "web_search"
-                    result = self._run_tool(client, m, caller, tool_call.name, tool_call.arguments, now)
+                    read_sheet = read_sheet or tool_call.name in ("lookup_rows", "total_rows")
+                    result = self._run_tool(client, m, caller, tool_call.name, tool_call.arguments, now,
+                                            searched=searches > 0)
                 if isinstance(result, Final):
                     if tool_call.name == "send_email":
                         preview = result.text
                     else:
                         finals.append(result.text)
-                    if caller.role != "staff":
-                        break  # one proposal per customer turn: a second would replace the pending one
+                    if caller.role != "staff" or searches:
+                        break  # one pending proposal per turn: a second would replace it
                 else:
                     results.append((tool_call, result))
             if finals or preview is not None:  # code-composed replies end the turn; failures are listed, not dropped
@@ -311,7 +316,7 @@ class Bot:
         return [FALLBACK]
 
     def _run_tool(self, client: Client, m: Incoming, caller: Caller, name: str, args: dict,
-                  now: float) -> dict | Final:
+                  now: float, searched: bool = False) -> dict | Final:
         tab = str(args.get("tab") or "")
         tab = next((t for t in client.tabs if t.lower() == tab.lower()), tab)
         try:
@@ -328,7 +333,9 @@ class Bot:
                 result = build_row(self.sheets, client, caller, tab, values if isinstance(values, list) else [])
                 if "error" in result:
                     return result
-                if caller.role == "staff":  # staff rows save at once; the reply shows exactly what was saved
+                # Staff rows save at once (the reply shows exactly what was saved), unless web text is in this turn:
+                # it could have asked for the row, so a person confirms it with YES.
+                if caller.role == "staff" and not searched:
                     self.sheets.append(client.sheet_id, tab, result["row"])
                     return Final(saved_text(tab, result["row"]))
                 self.store.put_pending(client.id, m.chat_id, m.sender_id, tab, result["row"], now + PENDING_TTL)

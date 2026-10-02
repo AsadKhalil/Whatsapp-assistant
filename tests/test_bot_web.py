@@ -110,3 +110,21 @@ def test_staff_and_customer_prompts_carry_their_web_rules():
     plain, plain_llm = make_bot(say("Hi"))
     plain.handle(incoming("hi", phone=STAFF))
     assert "web_search" not in plain_llm.calls[0][0]["content"]
+
+
+def test_after_a_web_search_a_staff_row_waits_for_yes():
+    row = {"tab": "Expenses", "values": [{"column": "Item", "value": "Flour"}, {"column": "Amount", "value": "500"}]}
+    bot, _ = web_bot(call("web_search", query="flour price"), call("propose_row", **row))
+    bot.handle(incoming("search flour price and add it to expenses", phone=STAFF))
+    assert bot.sheets.appended == []  # web text could have asked for that row, so a person confirms it
+    assert "YES" in texts(bot.meta)[-1]
+    bot.handle(incoming("yes", phone=STAFF))
+    assert [(tab, row["Item"]) for tab, row in bot.sheets.appended] == [("Expenses", "Flour")]
+
+
+def test_no_web_search_after_the_turn_has_searched_and_read_the_sheet():
+    bot, llm = web_bot(call("web_search", query="q1"), call("lookup_rows", tab="Orders", query=""),
+                       call("web_search", query="orders of Ali"), say("Done."))
+    bot.handle(incoming("find it", phone=STAFF))
+    assert bot.web.queries == ["q1"]
+    assert "error" in tool_results(llm, 3)[-1]
