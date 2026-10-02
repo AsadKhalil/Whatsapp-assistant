@@ -12,6 +12,7 @@ from typing import Callable
 
 from app.config import FILL_SOURCES, client_from_dict
 from app.sheet_rules import tab_problems
+from app.sheets import sheet_error
 
 log = logging.getLogger("setup")
 
@@ -310,3 +311,82 @@ def take_turn(llm, spend: Callable[[], bool], business_id: str, config: dict,
             continue
         log.info("setup_turn business=%s outcome=draft", business_id)
         return Turn([*convo, {"role": "assistant", "content": MADE_DRAFT}], new, problems)
+
+
+def same_question(text: str) -> str:
+    """A question as Apply compares it: ignoring case and surrounding or repeated spaces."""
+    return " ".join(text.split()).casefold()
+
+
+def known_questions(sheets, config: dict, sheet_tabs: dict[str, list[str]]) -> set[str]:
+    """The questions already in the Knowledge tab; none when the tab doesn't exist yet."""
+    tab = find_tab(system_tabs(config)[0][0], sheet_tabs)
+    if tab is None:
+        return set()
+    return {same_question(str(value)) for row in sheets.rows(config["sheet_id"], tab)
+            for key, value in row.items() if key.casefold() == "question"}
+
+
+@dataclass
+class Applied:
+    created: list[str] = field(default_factory=list)  # tabs added
+    columns: dict[str, list[str]] = field(default_factory=dict)  # columns added, per existing tab
+    rows: int = 0  # Knowledge rows added
+    error: str = ""  # why the Sheet steps stopped; "" when they all worked
+
+
+def apply_sheet(sheets, business_id: str, config: dict, draft: dict, sheet_tabs: dict[str, list[str]],
+                email: str) -> Applied:
+    """Add the missing tabs, then the missing columns, then the new Knowledge rows; stop at the first failure.
+
+    `draft` must have passed check_draft against `sheet_tabs`, read just now. Every step skips what already
+    exists, so running it again finishes the job.
+    """
+    done = Applied()
+    wanted = [*system_tabs(config), *((tab["name"], tab["columns"]) for tab in draft["tabs"] if tab["use"])]
+    sheet_id = config["sheet_id"]
+    try:
+        for name, columns in wanted:
+            if tab_plan(name, columns, sheet_tabs)["existing"] is None:
+                sheets.add_tab(sheet_id, name, columns)
+                sheet_tabs = {**sheet_tabs, name: list(columns)}
+                done.created.append(name)
+        for name, columns in wanted:
+            plan = tab_plan(name, columns, sheet_tabs)
+            if plan["add"]:
+                sheets.add_columns(sheet_id, plan["existing"], plan["add"])
+                done.columns[plan["existing"]] = plan["add"]
+        seen, rows = known_questions(sheets, config, sheet_tabs), []
+        for row in draft["knowledge"]:
+            if row["keep"] and same_question(row["question"]) not in seen:
+                seen.add(same_question(row["question"]))
+                rows.append({"Question": row["question"], "Answer": row["answer"]})
+        if rows:
+            sheets.append_rows(sheet_id, find_tab(wanted[0][0], sheet_tabs), rows)
+            done.rows = len(rows)
+    except Exception as e:
+        log.warning("setup_apply_failed business=%s error=%s", business_id, type(e).__name__)
+        done.error = sheet_error(e, email)
+    return done
+
+
+def _and(items: list[str]) -> str:
+    return items[0] if len(items) == 1 else f"{', '.join(items[:-1])} and {items[-1]}"
+
+
+def summary(done: Applied, changes: dict, config: dict) -> list[str]:
+    """What Apply did, in plain words."""
+    lines = []
+    if done.created:
+        lines.append(f"Added {'tab' if len(done.created) == 1 else 'tabs'} {_and(done.created)}.")
+    for tab, columns in done.columns.items():
+        lines.append(f"Added {'column' if len(columns) == 1 else 'columns'} {_and(columns)} to {tab}.")
+    if done.rows:
+        lines.append(f"Added {done.rows} Knowledge {'row' if done.rows == 1 else 'rows'}.")
+    permitted = [tab for tab in changes.get("tabs", {}) if tab not in (config.get("tabs") or {})]
+    if permitted:
+        lines.append(f"Saved permissions for {_and(permitted)}.")
+    persona = [LABELS[key] for key in PERSONA if key in changes]
+    if persona:
+        lines.append(f"Saved {_and(persona)}.")
+    return lines

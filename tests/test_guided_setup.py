@@ -1,8 +1,8 @@
 import pytest
 
-from app.guided_setup import (AI_DOWN, DRAFT_NOW, MADE_DRAFT, REMINDER, SetupError, check_draft, draft_from_args,
-                              setup_changes, tab_plan, take_turn)
-from tests.fakes import SETUP_ARGS, ScriptedLLM, acme_config, bakery_sheets, call, say
+from app.guided_setup import (AI_DOWN, DRAFT_NOW, MADE_DRAFT, REMINDER, SetupError, apply_sheet, check_draft,
+                              draft_from_args, setup_changes, summary, tab_plan, take_turn)
+from tests.fakes import SETUP_ARGS, FakeSheets, ScriptedLLM, acme_config, bakery_sheets, call, say
 
 
 def sheet_tabs() -> dict[str, list[str]]:
@@ -165,3 +165,40 @@ def test_ai_errors_and_the_daily_cap_change_nothing():
     bad = {**SETUP_ARGS, "bot_name": ""}
     with pytest.raises(SetupError, match="limit for today"):  # the retry is the second call
         turn(ScriptedLLM(call("propose_setup", **bad), call("propose_setup", **SETUP_ARGS)), Budget(left=1))
+
+
+def test_apply_adds_only_what_is_missing_and_skips_known_questions():
+    sheets = bakery_sheets()
+    d = draft()
+    d["knowledge"].append({"question": "WHAT are  your hours?", "answer": "Twice", "keep": True})  # repeated
+    done = apply_sheet(sheets, "acme", acme_config(), d, sheets.tab_headers("sheet-1"), "")
+    assert done.error == "" and sheets.written == [
+        ("add_tab", "Bookings", ["Date", "Name", "Phone", "Guests"]),
+        ("add_columns", "Orders", ["Status"]),
+        ("append_rows", "Knowledge", [{"Question": "What are your hours?", "Answer": "Tue-Sun 10am-8pm"}])]
+    assert summary(done, {"personality": "x"}, acme_config()) == [
+        "Added tab Bookings.", "Added column Status to Orders.", "Added 1 Knowledge row.", "Saved Personality."]
+
+
+def test_a_new_sheet_gets_the_knowledge_and_handoffs_tabs_first():
+    sheets = FakeSheets({})
+    done = apply_sheet(sheets, "acme", acme_config(), draft(tabs=[]), {}, "")
+    assert [w[:2] for w in sheets.written] == [("add_tab", "Knowledge"), ("add_tab", "Handoffs"),
+                                               ("append_rows", "Knowledge")]
+    assert sheets.headers("sheet-1", "Handoffs") == ["Time", "Name", "Phone", "Chat", "Question", "Reason"]
+    assert done.created == ["Knowledge", "Handoffs"] and done.rows == 2
+    changes = {"tabs": {**acme_config()["tabs"], "Leads": {"customer": []}}, "bot_name": "Mia", "personality": "x"}
+    assert summary(done, changes, acme_config())[-2:] == ["Saved permissions for Leads.",
+                                                          "Saved Bot name and Personality."]
+
+
+def test_a_failed_step_stops_and_running_again_finishes_without_repeating():
+    sheets = bakery_sheets()
+    sheets.fail_writes = {"Knowledge"}
+    first = apply_sheet(sheets, "acme", acme_config(), draft(), sheets.tab_headers("sheet-1"),
+                        "bot@x.iam.gserviceaccount.com")
+    assert first.created == ["Bookings"] and first.columns == {"Orders": ["Status"]} and first.rows == 0
+    assert first.error == "Share the Sheet with bot@x.iam.gserviceaccount.com as Editor."
+    sheets.fail_writes = set()
+    second = apply_sheet(sheets, "acme", acme_config(), draft(), sheets.tab_headers("sheet-1"), "")
+    assert second.created == [] and second.columns == {} and second.rows == 1 and second.error == ""
