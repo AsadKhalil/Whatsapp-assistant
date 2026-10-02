@@ -3,6 +3,7 @@ import json
 import pytest
 
 from app.config import Settings
+from app.db import Db
 from app.registry import Registry
 from app.vault import Vault
 from tests.fakes import acme_config, memory_registry, registry_with_acme
@@ -178,3 +179,22 @@ def test_an_unreadable_app_password_switches_email_off():
     reopened = Registry(registry.db, Vault("another-key"))
     assert reopened.clients()["acme"].email_address == ""
     assert reopened.business("acme").email_unreadable
+
+
+def test_setup_interviews_are_kept_and_start_over_keeps_the_days_ai_calls():
+    now = [1_790_000_000.0]  # 14:13 UTC
+    registry = Registry(Db(":memory:"), Vault("test-secret"), clock=lambda: now[0])
+    registry.create_business("acme", acme_config(), actor="t")
+    assert registry.setup("acme") == {"messages": [], "draft": None, "applied_at": None}
+    assert all(registry.spend_setup_call("acme", 3) for _ in range(3))
+    assert not registry.spend_setup_call("acme", 3)
+    registry.save_setup("acme", [{"role": "user", "content": "We bake cakes"}], {"bot_name": "Mia"})
+    assert registry.setup("acme")["draft"] == {"bot_name": "Mia"}
+    registry.save_setup("acme", [], None)  # Start over
+    assert registry.setup("acme")["messages"] == [] and not registry.spend_setup_call("acme", 3)
+    now[0] += 86_400  # the next UTC day
+    assert registry.spend_setup_call("acme", 3)
+    registry.setup_applied("acme", actor="7", detail={"knowledge_rows": 2})
+    assert registry.setup("acme")["applied_at"] == now[0]
+    entry = registry.audit_log("acme")[0]
+    assert entry["action"] == "setup.apply" and json.loads(entry["detail"]) == {"knowledge_rows": 2}

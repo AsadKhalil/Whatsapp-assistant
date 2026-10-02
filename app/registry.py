@@ -53,6 +53,15 @@ CREATE TABLE IF NOT EXISTS email_accounts (
   app_password TEXT NOT NULL,
   updated_at REAL NOT NULL
 );
+CREATE TABLE IF NOT EXISTS setups (
+  business_id TEXT PRIMARY KEY REFERENCES businesses(id),
+  messages TEXT NOT NULL,     -- JSON list of {"role": "user"|"assistant", "content": str}
+  draft TEXT,                 -- JSON draft, or NULL
+  turn_day TEXT NOT NULL,     -- UTC date of the counted AI calls, YYYY-MM-DD
+  turns INTEGER NOT NULL,     -- AI calls made on turn_day
+  applied_at REAL,            -- last successful Apply, or NULL
+  updated_at REAL NOT NULL
+);
 """
 SLUG = re.compile(r"[a-z0-9][a-z0-9-]{1,30}[a-z0-9]")
 CONFIG_KEYS = frozenset({"business", "bot_name", "sheet_id", "timezone", "date_format", "instructions", "personality",
@@ -61,6 +70,7 @@ CONFIG_KEYS = frozenset({"business", "bot_name", "sheet_id", "timezone", "date_f
 SELECT_BUSINESS = ("SELECT b.*, n.session, e.address AS email_address, e.app_password AS email_app_password"
                    " FROM businesses b LEFT JOIN numbers n ON n.business_id = b.id"
                    " LEFT JOIN email_accounts e ON e.business_id = b.id")
+SETUP_KEEP = 30 * 86_400  # seconds an untouched setup interview is kept
 
 
 @dataclass(frozen=True)
@@ -254,6 +264,51 @@ class Registry:
     def remove_email(self, business_id: str, actor: str) -> None:
         if self.db.write("DELETE FROM email_accounts WHERE business_id = ?", (business_id,)):
             self.audit(actor, business_id, "email.remove", {})
+
+    # --- guided setup
+
+    def _day(self) -> str:
+        return time.strftime("%Y-%m-%d", time.gmtime(self.clock()))
+
+    def setup(self, business_id: str) -> dict:
+        """The business's setup interview: its messages, its draft (or None) and when it was last applied."""
+        row = self.db.one("SELECT messages, draft, applied_at FROM setups WHERE business_id = ?", (business_id,))
+        if row is None:
+            return {"messages": [], "draft": None, "applied_at": None}
+        return {"messages": json.loads(row["messages"]), "draft": json.loads(row["draft"]) if row["draft"] else None,
+                "applied_at": row["applied_at"]}
+
+    def save_setup(self, business_id: str, messages: list[dict], draft: dict | None) -> None:
+        """Store the conversation and draft. The day's AI call count is kept, so Start over can't reset it."""
+        self.db.write("INSERT INTO setups (business_id, messages, draft, turn_day, turns, updated_at)"
+                      " VALUES (?, ?, ?, ?, 0, ?) ON CONFLICT (business_id) DO UPDATE SET"
+                      " messages = excluded.messages, draft = excluded.draft, updated_at = excluded.updated_at",
+                      (business_id, json.dumps(messages, ensure_ascii=False),
+                       None if draft is None else json.dumps(draft, ensure_ascii=False), self._day(), self.clock()))
+
+    def spend_setup_call(self, business_id: str, limit: int) -> bool:
+        """Count one AI call for today (UTC); False, counting nothing, once `limit` calls were made today."""
+        today = self._day()
+        with self.db.transaction():
+            row = self.db.one("SELECT turn_day, turns FROM setups WHERE business_id = ?", (business_id,))
+            turns = row["turns"] if row and row["turn_day"] == today else 0
+            if turns >= limit:
+                return False
+            self.db.write("INSERT INTO setups (business_id, messages, turn_day, turns, updated_at)"
+                          " VALUES (?, '[]', ?, ?, ?) ON CONFLICT (business_id) DO UPDATE SET"
+                          " turn_day = excluded.turn_day, turns = excluded.turns, updated_at = excluded.updated_at",
+                          (business_id, today, turns + 1, self.clock()))
+        return True
+
+    def setup_applied(self, business_id: str, actor: str, detail: dict) -> None:
+        """Record a successful Apply: what was added (never Knowledge text)."""
+        self.db.write("UPDATE setups SET applied_at = ?, updated_at = ? WHERE business_id = ?",
+                      (self.clock(), self.clock(), business_id))
+        self.audit(actor, business_id, "setup.apply", detail)
+
+    def purge_setups(self, now: float) -> int:
+        """Forget setup interviews nobody touched for 30 days."""
+        return self.db.write("DELETE FROM setups WHERE updated_at < ?", (now - SETUP_KEEP,))
 
     # --- numbers
 

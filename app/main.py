@@ -60,8 +60,10 @@ def open_registry(settings: Settings) -> Registry:
     return registry
 
 
-def maintain(bot: Bot, backup_dir: str, now: float, clients: dict[str, Client] | None = None) -> None:
-    """Drop expired pending writes and messages past each client's retention, then keep 7 backups.
+def maintain(bot: Bot, backup_dir: str, now: float, clients: dict[str, Client] | None = None,
+             registry: Registry | None = None) -> None:
+    """Drop expired pending writes, messages past each client's retention and (given the registry) setup
+    interviews untouched for 30 days, then keep 7 backups.
 
     Every business's retention, paused ones too when `clients` is passed (from `registry.clients
     (include_paused=True)`); defaults to `bot.clients` (active businesses only).
@@ -69,6 +71,8 @@ def maintain(bot: Bot, backup_dir: str, now: float, clients: dict[str, Client] |
     bot.store.purge_expired_pending(now)
     for client in (bot.clients if clients is None else clients).values():
         bot.store.delete_older_than(client.id, now - client.retention_days * DAY)
+    if registry is not None:
+        registry.purge_setups(now)
     folder = Path(backup_dir)
     bot.store.backup(str(folder / f"assistant-{time.strftime('%Y%m%d', time.gmtime(now))}.db"))
     for old in sorted(folder.glob("assistant-*.db"))[:-7]:
@@ -113,7 +117,7 @@ def create_app(settings: Settings | None = None, bot: Bot | None = None, registr
             while True:
                 try:
                     await asyncio.to_thread(maintain, bot, settings.backup_dir, time.time(),
-                                            registry.clients(include_paused=True))
+                                            registry.clients(include_paused=True), registry)
                 except Exception:
                     log.exception("maintenance_failed")
                 await asyncio.sleep(DAY)

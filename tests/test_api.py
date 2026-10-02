@@ -1,13 +1,14 @@
 import hashlib
 import hmac
 import json
+import time
 
 from fastapi.testclient import TestClient
 
 from app.config import Settings
 from app.main import create_app, maintain
 from app.store import Store
-from tests.fakes import FakeWaha, make_bot, make_client, memory_registry, say
+from tests.fakes import FakeWaha, acme_config, make_bot, make_client, memory_registry, say
 from tests.payloads import meta_status, meta_text, waha_join, waha_message
 
 SETTINGS = Settings(secret_key="test-secret", meta_app_secret="app-secret", meta_verify_token="verify-me",
@@ -114,3 +115,14 @@ def test_maintenance_deletes_old_messages_and_keeps_seven_backups(tmp_path):
         maintain(bot, str(tmp_path / "backups"), start + day * 86_400)
     assert bot.store.history("acme", "c", 10) == []
     assert len(list((tmp_path / "backups").glob("assistant-*.db"))) == 7
+
+
+def test_maintenance_forgets_setup_interviews_untouched_for_30_days(tmp_path):
+    registry = memory_registry()
+    registry.create_business("acme", acme_config(), actor="t")
+    registry.save_setup("acme", [{"role": "user", "content": "We bake cakes"}], None)
+    bot = RecordingBot(Store(str(tmp_path / "a.db")))
+    maintain(bot, str(tmp_path / "backups"), time.time() + 29 * 86_400, registry=registry)
+    assert registry.setup("acme")["messages"]
+    maintain(bot, str(tmp_path / "backups"), time.time() + 31 * 86_400, registry=registry)
+    assert registry.setup("acme")["messages"] == []
