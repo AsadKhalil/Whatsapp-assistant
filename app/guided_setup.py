@@ -5,8 +5,15 @@ deletes, renames or moves anything, so pressing it again finishes a job that sto
 """
 from __future__ import annotations
 
+import json
+import logging
+from dataclasses import dataclass, field
+from typing import Callable
+
 from app.config import FILL_SOURCES, client_from_dict
 from app.sheet_rules import tab_problems
+
+log = logging.getLogger("setup")
 
 MAX_TABS, MAX_COLUMNS, MAX_ROWS = 10, 20, 60
 LIMITS = {"bot_name": 40, "personality": 1500, "instructions": 4000}
@@ -15,6 +22,16 @@ PERSONA = tuple(LABELS)
 KNOWLEDGE_COLUMNS = ["Question", "Answer"]
 HANDOFF_COLUMNS = ["Time", "Name", "Phone", "Chat", "Question", "Reason"]  # what Bot._handoff writes
 BAD_NAME_CHARACTERS = set("[]*?/\\:")  # Google refuses these in tab names
+DAILY_CALLS = 60  # AI calls per business per UTC day, retries included
+MAX_OWNER_MESSAGES = 30  # then only "Make the draft now"
+MAX_MESSAGE = 2000  # characters in one typed message
+GREETING = ("Hi! I'll ask a few quick questions about {business}, then suggest how your assistant should work. "
+            "What does your business do?")
+DRAFT_NOW = "Please make the draft now with what you know."
+REMINDER = "Call propose_setup now with the whole draft."
+MADE_DRAFT = "(I made a draft.)"
+AI_DOWN = "The assistant couldn't answer right now. Try again."
+LIMIT = "That's the limit for today. Your answers are saved; come back tomorrow, or edit the draft by hand."
 
 PROPOSE_SETUP_SPEC: dict = {"type": "function", "function": {
     "name": "propose_setup",
@@ -196,3 +213,100 @@ def check_draft(draft: dict, sheet_tabs: dict[str, list[str]], config: dict) -> 
         except ValueError as e:
             problems.append(("", str(e)))
     return problems
+
+
+class SetupError(Exception):
+    """A turn that changed nothing; the message is for the owner."""
+
+
+@dataclass
+class Turn:
+    messages: list[dict]  # the conversation to store
+    draft: dict | None = None  # a new draft from the AI, or None
+    problems: list[tuple[str, str]] = field(default_factory=list)  # the new draft's, after one retry
+
+
+def setup_prompt(config: dict, sheet_tabs: dict[str, list[str]] | None, draft: dict | None,
+                 problems: list[tuple[str, str]]) -> str:
+    """The interview's instructions, with the Sheet and settings as they are now and the current draft."""
+    if sheet_tabs is None:
+        tabs = "(the Sheet couldn't be read right now)"
+    else:
+        tabs = "\n".join(f"- {tab}: {', '.join(h for h in headers if h) or '(no header row)'}"
+                         + (" (permissions already set)" if has_permissions(tab, config) else "")
+                         for tab, headers in sheet_tabs.items()) or "(no tabs yet)"
+    current = "\n".join(f"- {LABELS[key]}: {str(config.get(key) or '').strip() or '(empty)'}" for key in PERSONA)
+    knowledge, handoffs = (name for name, _ in system_tabs(config))
+    text = (
+        f"You are helping the owner of {config['business']} set up {config.get('bot_name') or 'the assistant'}, "
+        "the business's WhatsApp AI assistant. The screen already greeted them and asked what the business does.\n"
+        "Rules:\n"
+        "- Ask one short question at a time, in the owner's language. About 6 to 12 questions in total.\n"
+        "- Cover: what the business sells or does; what customers ask about; what should be recorded (orders, "
+        "bookings, leads, expenses...) and which details each needs; what customers may look up (only their own "
+        "orders? a price list?); hours, location, prices and policies; the bot's name and tone.\n"
+        "- Tab and column names: short, plain English unless the owner asks otherwise. A tab where customers see "
+        "their own rows needs a phone column, given as owner_column.\n"
+        "- Never put private information in Knowledge (staff phone numbers, costs, margins, passwords): anyone who "
+        "messages the bot can be told everything in it.\n"
+        f"- Don't propose the {knowledge} or {handoffs} tabs: setup adds them by itself.\n"
+        "- Build on what exists: keep existing tab names and columns.\n"
+        "- When you know enough, or the owner asks for the draft, call propose_setup with the whole draft.\n\n"
+        f"The Sheet's tabs now:\n{tabs}\n\n"
+        f"The current settings:\n{current}"
+    )
+    if draft is not None:
+        text += ("\n\nThe current draft, which the owner may have edited by hand (\"use\": false means they "
+                 f"unticked a tab, \"keep\": false a Knowledge row):\n{json.dumps(draft, ensure_ascii=False)}")
+        if problems:
+            text += "\n\nProblems in it to fix:\n" + "\n".join(f"- {message}" for _, message in problems)
+    return text
+
+
+def take_turn(llm, spend: Callable[[], bool], business_id: str, config: dict,
+              sheet_tabs: dict[str, list[str]] | None, messages: list[dict], draft: dict | None, owner_text: str,
+              want_draft: bool) -> Turn:
+    """The owner's message and the AI's answer: its next question, or a checked draft.
+
+    `spend()` counts one AI call and returns False once today's calls are used up. A draft that fails the checks
+    goes back to the AI once; a draft request answered in text gets one reminder. Raises SetupError, changing
+    nothing, when the AI fails or the cap is reached.
+    """
+    convo = [*messages, {"role": "user", "content": owner_text}]
+    current = check_draft(draft, sheet_tabs or {}, config) if draft is not None else []
+    calls = [{"role": "system", "content": setup_prompt(config, sheet_tabs, draft, current)}, *convo]
+    reminded = retried = False
+    while True:
+        if not spend():
+            log.info("setup_turn business=%s outcome=limit", business_id)
+            raise SetupError(LIMIT)
+        try:
+            reply = llm.complete(calls, [PROPOSE_SETUP_SPEC])
+        except Exception as e:
+            log.warning("setup_turn business=%s outcome=error error=%s", business_id, type(e).__name__)
+            raise SetupError(AI_DOWN) from None
+        proposal = next((c for c in reply.tool_calls if c.name == "propose_setup"), None)
+        if proposal is None:
+            if want_draft and not reminded and reply.text:
+                reminded = True
+                calls += [reply.message, {"role": "user", "content": REMINDER}]
+                log.info("setup_turn business=%s outcome=retry", business_id)
+                continue
+            if not reply.text:
+                log.warning("setup_turn business=%s outcome=error error=empty", business_id)
+                raise SetupError(AI_DOWN)
+            log.info("setup_turn business=%s outcome=question", business_id)
+            return Turn([*convo, {"role": "assistant", "content": reply.text}])
+        new = draft_from_args(proposal.arguments, config)
+        problems = check_draft(new, sheet_tabs or {}, config)
+        if problems and not retried:
+            retried = True
+            feedback = json.dumps({"error": "Fix these problems and call propose_setup again with the whole draft.",
+                                   "problems": [message for _, message in problems]}, ensure_ascii=False)
+            # every tool call needs its answer, or the provider refuses the next request
+            calls += [reply.message, *({"role": "tool", "tool_call_id": c.id, "content": feedback}
+                                       for c in reply.tool_calls)]
+            log.info("setup_turn business=%s outcome=retry", business_id)
+            continue
+        log.info("setup_turn business=%s outcome=draft", business_id)
+        return Turn([*convo, {"role": "assistant", "content": MADE_DRAFT}], new, problems)

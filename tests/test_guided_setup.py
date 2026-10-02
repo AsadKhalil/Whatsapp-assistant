@@ -1,5 +1,8 @@
-from app.guided_setup import check_draft, draft_from_args, setup_changes, tab_plan
-from tests.fakes import SETUP_ARGS, acme_config, bakery_sheets
+import pytest
+
+from app.guided_setup import (AI_DOWN, DRAFT_NOW, MADE_DRAFT, REMINDER, SetupError, check_draft, draft_from_args,
+                              setup_changes, tab_plan, take_turn)
+from tests.fakes import SETUP_ARGS, ScriptedLLM, acme_config, bakery_sheets, call, say
 
 
 def sheet_tabs() -> dict[str, list[str]]:
@@ -90,3 +93,75 @@ def test_saved_permissions_are_kept_and_persona_follows_the_replace_ticks():
                                           "fill": {"Name": "name", "Phone": "phone"}}
     d["tabs"][0]["use"] = False
     assert "tabs" not in setup_changes(d, sheet_tabs(), acme_config())
+
+
+class Budget:
+    """spend() for take_turn: allows `left` AI calls."""
+
+    def __init__(self, left: int = 60) -> None:
+        self.left, self.used = left, 0
+
+    def __call__(self) -> bool:
+        if self.used >= self.left:
+            return False
+        self.used += 1
+        return True
+
+
+def turn(llm, budget=None, current=None, text="We bake cakes", want_draft=False):
+    return take_turn(llm, budget or Budget(), "acme", acme_config(), sheet_tabs(), [], current, text, want_draft)
+
+
+def test_a_plain_answer_is_the_next_question_and_the_prompt_builds_on_the_sheet():
+    llm = ScriptedLLM(say("What do customers ask about most?"))
+    t = turn(llm)
+    assert t.messages == [{"role": "user", "content": "We bake cakes"},
+                          {"role": "assistant", "content": "What do customers ask about most?"}] and t.draft is None
+    system = llm.calls[0][0]["content"]
+    assert "- Orders: Date, Item, Qty, Name, Phone (permissions already set)" in system
+    assert "Sweet Bakes" in system and "- Bot name: Sara" in system and "one short question at a time" in system
+    assert llm.tools == [["propose_setup"]]
+
+
+def test_a_proposal_is_checked_and_becomes_the_draft():
+    t = turn(ScriptedLLM(call("propose_setup", **SETUP_ARGS)))
+    assert t.messages[-1] == {"role": "assistant", "content": MADE_DRAFT}
+    assert t.draft["bot_name"] == "Mia" and t.problems == []
+
+
+def test_a_failing_draft_goes_back_once_then_is_shown_with_its_problems():
+    bad = {**SETUP_ARGS, "bot_name": ""}
+    llm, budget = ScriptedLLM(call("propose_setup", **bad), call("propose_setup", **bad)), Budget()
+    t = turn(llm, budget)
+    feedback = llm.calls[1][-1]
+    assert feedback["role"] == "tool" and "Bot name: 1 to 40" in feedback["content"]
+    assert budget.used == 2 and t.draft["bot_name"] == ""
+    assert t.problems == [("persona", "Bot name: 1 to 40 characters.")]
+    fixed = turn(ScriptedLLM(call("propose_setup", **bad), call("propose_setup", **SETUP_ARGS)))
+    assert fixed.problems == [] and fixed.draft["bot_name"] == "Mia"
+
+
+def test_a_draft_request_answered_in_text_gets_one_reminder():
+    llm = ScriptedLLM(say("Sure! What are your hours?"), call("propose_setup", **SETUP_ARGS))
+    t = turn(llm, text=DRAFT_NOW, want_draft=True)
+    assert llm.calls[1][-1] == {"role": "user", "content": REMINDER} and t.draft is not None
+    stubborn = turn(ScriptedLLM(say("First, your hours?"), say("I still need your hours.")), want_draft=True)
+    assert stubborn.draft is None and stubborn.messages[-1]["content"] == "I still need your hours."
+
+
+def test_the_current_draft_and_its_problems_go_to_the_ai():
+    current = draft(bot_name="")
+    llm = ScriptedLLM(call("propose_setup", **SETUP_ARGS))
+    turn(llm, current=current, text="Make it formal", want_draft=True)
+    system = llm.calls[0][0]["content"]
+    assert '"bot_name": ""' in system and "Bot name: 1 to 40 characters." in system
+
+
+def test_ai_errors_and_the_daily_cap_change_nothing():
+    budget = Budget()
+    with pytest.raises(SetupError, match=AI_DOWN):
+        turn(ScriptedLLM(fail=True), budget)
+    assert budget.used == 1  # a failed call counts too
+    bad = {**SETUP_ARGS, "bot_name": ""}
+    with pytest.raises(SetupError, match="limit for today"):  # the retry is the second call
+        turn(ScriptedLLM(call("propose_setup", **bad), call("propose_setup", **SETUP_ARGS)), Budget(left=1))
