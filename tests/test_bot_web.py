@@ -128,3 +128,12 @@ def test_no_web_search_after_the_turn_has_searched_and_read_the_sheet():
     bot.handle(incoming("find it", phone=STAFF))
     assert bot.web.queries == ["q1"]
     assert "error" in tool_results(llm, 3)[-1]
+
+
+def test_web_answers_are_in_the_bots_own_words_and_a_staff_pending_row_isnt_called_a_customers():
+    row = {"tab": "Expenses", "values": [{"column": "Item", "value": "Flour"}, {"column": "Amount", "value": "500"}]}
+    bot, llm = web_bot(call("web_search", query="flour price"), call("propose_row", **row), say("Hi"), customers=True)
+    bot.handle(incoming("add today's flour price to expenses", phone=STAFF))
+    bot.handle(incoming("hi", phone=STAFF))  # the row still waits for YES
+    prompt = llm.calls[-1][0]["content"]
+    assert "in your own words" in prompt and "This customer" not in prompt
