@@ -10,6 +10,7 @@ from zoneinfo import ZoneInfo, available_timezones
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import Response
 
+from app import guided_setup
 from app.auth import Session
 from app.config import client_from_dict, digits
 from app.mailer import MailError
@@ -170,19 +171,25 @@ def staff_page(request: Request, scope: Scope, form: Form | None) -> Response:
                 numbers_text=numbers_text, groups=groups, groups_error=groups_error)
 
 
+def rule_from_form(form: Form, i: int) -> dict:
+    """The permissions ticked for tab i; the Sheet and Setup screens use the same field names."""
+    customer = [access for access in ("read", "own", "append") if form.has(f"{access}{i}")]
+    rule: dict = {"customer": customer}
+    if "own" in customer:
+        rule["owner_column"] = form.get(f"owner{i}")
+    if "append" in customer:
+        rule["fill"] = {form.get(f"fill_{source}{i}"): source for source in ("name", "phone")
+                        if form.get(f"fill_{source}{i}")}
+    return rule
+
+
 def tabs_from_form(form: Form, sheet_tabs: dict[str, list[str]]) -> tuple[dict, list[str]]:
     """The per-tab permissions ticked on the Sheet screen, and why any can't be saved."""
     tabs, problems = {}, []
     for i, (tab, headers) in enumerate(sheet_tabs.items()):
         if not form.has(f"use{i}"):
             continue  # the bot doesn't use this tab at all
-        customer = [access for access in ("read", "own", "append") if form.has(f"{access}{i}")]
-        rule: dict = {"customer": customer}
-        if "own" in customer:
-            rule["owner_column"] = form.get(f"owner{i}")
-        if "append" in customer:
-            rule["fill"] = {form.get(f"fill_{source}{i}"): source for source in ("name", "phone")
-                            if form.get(f"fill_{source}{i}")}
+        rule = rule_from_form(form, i)
         problems += tab_problems(tab, rule, headers, confirmed=form.has(f"confirm{i}"))
         tabs[tab] = rule
     return tabs, problems
@@ -287,3 +294,109 @@ def email_page(request: Request, scope: Scope, form: Form | None) -> Response:
                 state.reload()
                 return redirect(f"{scope.base}/email?ok={'email_removed' if action == 'remove' else 'saved'}")
     return page(request, scope, "email.html", title="Email", error=error, notice=notice, address=address)
+
+
+FORM_MAX = 100  # most tabs or Knowledge rows read back from one posted draft
+
+
+def _count(form: Form, name: str) -> int:
+    value = form.get(name)
+    return min(int(value), FORM_MAX) if value.isdigit() else 0
+
+
+def draft_from_form(form: Form) -> dict:
+    """The draft as posted from the Setup screen, hand edits included."""
+    tabs = []
+    for i in range(_count(form, "tab_count")):
+        rule = rule_from_form(form, i)
+        tabs.append({"name": form.get(f"name{i}"), "purpose": form.get(f"purpose{i}"),
+                     "columns": guided_setup.split_columns(form.get(f"columns{i}")), "customer": rule["customer"],
+                     "owner_column": rule.get("owner_column", ""), "fill": rule.get("fill", {}),
+                     "use": form.has(f"use{i}"), "confirmed": form.has(f"confirm{i}")})
+    knowledge = [{"question": form.get(f"question{i}"), "answer": form.get(f"answer{i}"),
+                  "keep": not form.has(f"remove{i}")} for i in range(_count(form, "row_count"))]
+    return {**{key: form.get(key) for key in guided_setup.PERSONA},
+            "replace": {key: form.has(f"replace_{key}") for key in guided_setup.PERSONA},
+            "tabs": tabs, "knowledge": knowledge}
+
+
+def apply_setup(request: Request, scope: Scope, draft: dict, sheet_tabs: dict[str, list[str]], email: str) -> dict:
+    """Apply a checked draft: the Sheet first, the settings only when every Sheet step worked."""
+    business, config = scope.business, scope.business.config
+    done = guided_setup.apply_sheet(request.app.state.bot.sheets, business.id, config, draft, sheet_tabs, email)
+    error, changes = done.error, {}
+    if not error:
+        changes = guided_setup.setup_changes(draft, sheet_tabs, config)
+        try:
+            if changes:
+                save(request, scope, changes)
+        except ValueError as e:
+            error, changes = str(e), {}
+    if not error:
+        request.app.state.registry.setup_applied(business.id, str(scope.session.user.id), {
+            "tabs_created": done.created, "columns_added": done.columns, "knowledge_rows": done.rows})
+        log.info("setup_apply business=%s tabs=%s columns=%s rows=%s", business.id, len(done.created),
+                 sum(len(columns) for columns in done.columns.values()), done.rows)
+    return {"lines": guided_setup.summary(done, changes, config), "error": error}
+
+
+@screen("/setup", ("GET", "POST"))
+def setup_page(request: Request, scope: Scope, form: Form | None) -> Response:
+    """Guided setup: the owner chats with the AI, edits its draft, and Apply adds it to the Sheet and settings."""
+    state, business = request.app.state, scope.business
+    registry, config = state.registry, business.config
+    saved = registry.setup(business.id)
+    messages, draft = saved["messages"], saved["draft"]
+    email = service_account_email(state.settings.google_service_account_file)
+    sheet_tabs, sheet_problem = None, ""
+    try:
+        sheet_tabs = state.bot.sheets.tab_headers(config["sheet_id"])
+    except Exception as e:
+        sheet_problem = sheet_error(e, email)
+    action = form.get("action") if form is not None else ""
+    view = "chat" if request.query_params.get("view") == "chat" or draft is None else "draft"
+    error, text, result = "", "", None
+    if action == "start_over":
+        registry.save_setup(business.id, [], None)
+        return redirect(f"{scope.base}/setup")
+    if action in ("save", "back", "change", "apply"):  # every post from the draft screen keeps the hand edits
+        draft, view = draft_from_form(form), "draft"
+        registry.save_setup(business.id, messages, draft)
+        if action == "save":
+            return redirect(f"{scope.base}/setup")
+        if action == "back":
+            return redirect(f"{scope.base}/setup?view=chat#reply")
+    if action in ("send", "draft_now", "change"):
+        owner_text = guided_setup.DRAFT_NOW if action == "draft_now" else form.get("text")
+        text = "" if action == "draft_now" else owner_text
+        if action == "send" and sum(m["role"] == "user" for m in messages) >= guided_setup.MAX_OWNER_MESSAGES:
+            error = "That's the most answers for one interview. Press Make the draft now."
+        elif not owner_text or len(owner_text) > guided_setup.MAX_MESSAGE:
+            error = f"Write a message of 1 to {guided_setup.MAX_MESSAGE:,} characters."
+        else:
+            try:
+                turn = guided_setup.take_turn(
+                    state.bot.llm, lambda: registry.spend_setup_call(business.id, guided_setup.DAILY_CALLS),
+                    business.id, config, sheet_tabs, messages, draft, owner_text, want_draft=action != "send")
+            except guided_setup.SetupError as e:
+                error = str(e)
+            else:
+                registry.save_setup(business.id, turn.messages, turn.draft or draft)
+                return redirect(f"{scope.base}/setup" + ("" if turn.draft else "?view=chat#reply"))
+    elif action == "apply":
+        if sheet_problem:
+            error = sheet_problem
+        elif guided_setup.check_draft(draft, sheet_tabs, config):
+            error = "Fix the problems marked below, then press Apply again."
+        else:
+            result = apply_setup(request, scope, draft, sheet_tabs, email)
+    if sheet_problem:
+        view = "chat"  # the draft screen needs the Sheet's tabs
+    shown = (guided_setup.draft_view(state.bot.sheets, config, draft, sheet_tabs)
+             if view == "draft" and result is None else {})
+    return page(request, scope, "setup.html", title="Guided setup", view=view, result=result, error=error,
+                config=config, messages=messages, draft=draft, text=text, sheet_problem=sheet_problem,
+                greeting=guided_setup.GREETING.format(business=config["business"]),
+                owner_messages=sum(m["role"] == "user" for m in messages),
+                max_messages=guided_setup.MAX_OWNER_MESSAGES, max_message=guided_setup.MAX_MESSAGE,
+                persona=guided_setup.LABELS, limits=guided_setup.LIMITS, **shown)

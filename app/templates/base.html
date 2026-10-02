@@ -6,7 +6,7 @@
   {% if refresh %}<meta http-equiv="refresh" content="{{ refresh }}">{% endif %}
   <title>{{ title }} · WhatsApp Assistant</title>
   <link rel="stylesheet" href="/static/pico.min.css">
-  <link rel="stylesheet" href="/static/app.css?v=11">
+  <link rel="stylesheet" href="/static/app.css?v=12">
 </head>
 <body>
 <a class="skip-link" href="#main">Skip to content</a>
@@ -32,6 +32,7 @@
 <main class="container" id="main" tabindex="-1">
   {% if business_nav %}<nav class="tabs" aria-label="Business"><ul>{% include "_business_nav.html" %}</ul><ul>
     <li><a href="{{ base }}">Home</a></li>
+    <li><a href="{{ base }}/setup">Setup</a></li>
     <li><a href="{{ base }}/settings">Bot settings</a></li>
     <li><a href="{{ base }}/staff">Staff &amp; groups</a></li>
     <li><a href="{{ base }}/sheet">Sheet</a></li>

@@ -309,3 +309,6 @@ button.danger:hover, button.danger:focus-visible {
 /* Sheet page: a tab the bot doesn't use keeps its options visible but quiet */
 article:has(.use-tab:not(:checked)) .tab-options { opacity: 0.55; }
 form.sheet-id { align-items: end; }
+
+/* Guided setup: chat bubbles and saved text keep their line breaks */
+.pre-line { white-space: pre-line; }

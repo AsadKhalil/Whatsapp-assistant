@@ -1,0 +1,168 @@
+{% extends "base.html" %}
+{% block content %}
+<h1>Guided setup</h1>
+{% if result %}
+<section class="setup-phase">
+  <header class="phase-head"><span class="phase-tag">{{ "Stopped" if result.error else "Done" }}</span>
+    <h2>{{ "Setup stopped part-way" if result.error else "Setup applied" }}</h2></header>
+  {% for line in result.lines %}<p>{{ line }}</p>{% endfor %}
+  {% if result.error %}
+  <p class="notice error">{{ result.error }} Nothing in the settings changed. Fix that, then press Apply again: it
+    skips what is already there.</p>
+  {% elif not result.lines %}
+  <p>Everything in the draft was already in place.</p>
+  {% endif %}
+  <p><a href="{{ base }}">Home</a> · <a href="{{ base }}/sheet">Sheet page</a> · <a href="{{ base }}/setup">Back to the draft</a></p>
+</section>
+{% elif view == "draft" %}
+<p class="muted lede">Check the draft and change anything you like. Nothing in your Sheet or settings changes until
+  you press <strong>Apply</strong>, and Apply only adds: it never deletes, renames or moves anything.</p>
+<p><a href="{{ base }}/setup?view=chat">See the conversation</a></p>
+{% if problems %}
+<div class="notice error"><p>Fix these before you apply:</p>
+  <ul>{% for where, message in problems %}<li>{{ message }}</li>{% endfor %}</ul></div>
+{% endif %}
+<form method="post">
+  <input type="hidden" name="csrf" value="{{ csrf }}">
+  <input type="hidden" name="tab_count" value="{{ draft.tabs|length }}">
+  <input type="hidden" name="row_count" value="{{ draft.knowledge|length }}">
+
+  <h2>How the bot sounds</h2>
+  {% for where, message in problems if where == "persona" %}<p class="field-error">{{ message }}</p>{% endfor %}
+  {% for key, label in persona.items() %}
+  <article>
+    <div class="grid">
+      {% if config[key] %}
+      <div><p><strong>{{ label }} now</strong></p><p class="pre-line">{{ config[key] }}</p></div>
+      {% endif %}
+      <label>{{ label }}{% if config[key] %}, suggested{% endif %}
+        {% if key == "bot_name" %}<input name="bot_name" value="{{ draft.bot_name }}" maxlength="{{ limits.bot_name }}">
+        {% else %}<textarea name="{{ key }}" rows="{{ 3 if key == 'personality' else 6 }}" maxlength="{{ limits[key] }}">{{ draft[key] }}</textarea>{% endif %}
+      </label>
+    </div>
+    <label><input type="checkbox" name="replace_{{ key }}"{% if draft.replace[key] %} checked{% endif %}>
+      {% if config[key] %}Replace the current {{ label|lower }} with the suggestion{% else %}Save this {{ label|lower }}{% endif %}</label>
+  </article>
+  {% endfor %}
+
+  <h2>Sheet tabs</h2>
+  {% for s in system %}
+  <article>
+    <header><strong>{{ s.name }}</strong>
+      {% if s.existing is none %}<span class="badge good">New tab</span>
+      {% elif s.add %}<span class="badge">Exists: adds columns {{ s.add|join(", ") }}</span>
+      {% else %}<span class="badge">Exists: nothing to add</span>{% endif %}
+      <small>Columns: {{ s.headers|select|join(", ") }}</small></header>
+    <p class="muted">{% if loop.first %}Read into every answer the bot gives.{% else %}Where requests for a person are written.{% endif %} Always included.</p>
+  </article>
+  {% endfor %}
+  {% for tab in draft.tabs %}
+  {% set i = loop.index0 %}{% set plan = plans[i] %}
+  <article id="tab-{{ i }}">
+    <header>
+      <label><input type="checkbox" class="use-tab" name="use{{ i }}"{% if tab.use %} checked{% endif %}> Use this tab</label>
+      {% if plan.existing is none %}<span class="badge good">New tab</span>
+      {% elif plan.add %}<span class="badge">Exists: adds columns {{ plan.add|join(", ") }}</span>
+      {% else %}<span class="badge">Exists: nothing to add</span>{% endif %}
+    </header>
+    {% for where, message in problems if where == "tab" ~ i %}<p class="field-error">{{ message }}</p>{% endfor %}
+    <div class="tab-options">
+      {% if plan.existing is none %}
+      <label>Tab name <input name="name{{ i }}" value="{{ tab.name }}" maxlength="100"></label>
+      {% else %}
+      <p><strong>{{ plan.existing }}</strong></p><input type="hidden" name="name{{ i }}" value="{{ plan.existing }}">
+      {% endif %}
+      <input type="hidden" name="purpose{{ i }}" value="{{ tab.purpose }}">
+      {% if tab.purpose %}<p class="muted">{{ tab.purpose }}</p>{% endif %}
+      <label>Columns <small>Separated by commas.{% if plan.existing %} Columns already in the tab stay as they are; new ones go after the last one.{% endif %}</small>
+        <input name="columns{{ i }}" value="{{ tab.columns|join(', ') }}"></label>
+      {% if plan.configured %}
+      <p class="muted">Permissions stay as they are; change them on the <a href="{{ base }}/sheet">Sheet page</a>.</p>
+      {% else %}
+      <p>Customers can (staff can always look up and add rows):</p>
+      <label><input type="checkbox" name="read{{ i }}"{% if "read" in tab.customer %} checked{% endif %}> read all rows</label>
+      <label><input type="checkbox" name="own{{ i }}"{% if "own" in tab.customer %} checked{% endif %}> see only their own rows, found by the phone number in
+        <select name="owner{{ i }}"><option value="">(pick a column)</option>{% for h in plan.headers if h %}<option{% if h == tab.owner_column %} selected{% endif %}>{{ h }}</option>{% endfor %}</select>
+      </label>
+      <label><input type="checkbox" name="append{{ i }}"{% if "append" in tab.customer %} checked{% endif %}> add rows (after replying YES), putting their WhatsApp name in
+        <select name="fill_name{{ i }}"><option value="">(none)</option>{% for h in plan.headers if h %}<option{% if tab.fill.get(h) == "name" %} selected{% endif %}>{{ h }}</option>{% endfor %}</select>
+        and their phone in
+        <select name="fill_phone{{ i }}"><option value="">(none)</option>{% for h in plan.headers if h %}<option{% if tab.fill.get(h) == "phone" %} selected{% endif %}>{{ h }}</option>{% endfor %}</select>
+      </label>
+      {% if plan.sensitive %}
+      <p class="notice warn">This tab has contact columns: {{ plan.sensitive|join(", ") }}.</p>
+      <label><input type="checkbox" name="confirm{{ i }}"{% if tab.confirmed %} checked{% endif %}> I understand every customer can see these columns if "read all rows" is ticked</label>
+      {% endif %}
+      {% endif %}
+    </div>
+  </article>
+  {% endfor %}
+
+  <h2>Knowledge</h2>
+  <p class="notice warn">Anyone who messages the bot can be told these answers. Never add private details such as
+    staff phone numbers, costs or passwords.</p>
+  {% for row in draft.knowledge %}
+  {% set i = loop.index0 %}
+  <article id="row-{{ i }}">
+    {% for where, message in problems if where == "row" ~ i %}<p class="field-error">{{ message }}</p>{% endfor %}
+    {% if present[i] %}<p><span class="badge">already in your Sheet</span> This question won't be added again.</p>{% endif %}
+    <label>Question <input name="question{{ i }}" value="{{ row.question }}" maxlength="200"></label>
+    <label>Answer <textarea name="answer{{ i }}" rows="2" maxlength="1000">{{ row.answer }}</textarea></label>
+    <label><input type="checkbox" name="remove{{ i }}"{% if not row.keep %} checked{% endif %}> Remove this row</label>
+  </article>
+  {% else %}
+  <p class="muted">No Knowledge rows in this draft.</p>
+  {% endfor %}
+
+  <h2>Ask the AI to change something</h2>
+  <label>What should change? <small>For example: make it more formal; add a Deliveries tab.</small>
+    <textarea name="text" rows="2" maxlength="{{ max_message }}">{{ text }}</textarea></label>
+  <div class="grid">
+    <button type="submit" name="action" value="change" class="secondary">Ask the AI</button>
+    <button type="submit" name="action" value="back" class="secondary">Back to chat</button>
+  </div>
+
+  <h2>Apply</h2>
+  <div class="grid">
+    <button type="submit" name="action" value="save" class="secondary">Save my changes</button>
+    <button type="submit" name="action" value="apply"
+            data-confirm="Apply this setup to {{ business.config.business }}? It adds the tabs, columns and Knowledge rows to your Sheet and saves the ticked settings. Nothing is deleted.">Apply</button>
+  </div>
+</form>
+{% else %}
+<p class="muted lede">Answer a few questions and the assistant drafts your Sheet tabs, Knowledge, permissions and how
+  the bot sounds. Nothing changes until you press <strong>Apply</strong> on the draft.</p>
+{% if sheet_problem and sheet_problem != error %}<p class="notice error">{{ sheet_problem }}</p>{% endif %}
+{% if draft %}<p><a href="{{ base }}/setup">Open the draft →</a></p>{% endif %}
+<div class="chat">
+  <div class="msg bot"><p>{{ greeting }}</p></div>
+  {% for m in messages %}
+  <div class="msg {{ 'customer' if m.role == 'user' else 'bot' }}"><p class="pre-line">{{ m.content }}</p></div>
+  {% endfor %}
+</div>
+<form method="post" id="reply">
+  <input type="hidden" name="csrf" value="{{ csrf }}">
+  {% if owner_messages < max_messages %}
+  <label>Your answer <textarea name="text" rows="3" maxlength="{{ max_message }}" required>{{ text }}</textarea></label>
+  <div class="grid">
+    <button type="submit" name="action" value="send">Send</button>
+    <button type="submit" name="action" value="draft_now" class="secondary" formnovalidate>Make the draft now</button>
+  </div>
+  {% else %}
+  <p class="notice warn">That's the most answers for one interview. Make the draft now; you can change it afterwards.</p>
+  <button type="submit" name="action" value="draft_now">Make the draft now</button>
+  {% endif %}
+</form>
+{% if messages or draft %}
+<section class="danger-zone">
+  <h2>Start over</h2>
+  <p class="muted">Clears the conversation and the draft. Nothing in your Sheet or settings changes.</p>
+  <form method="post">
+    <input type="hidden" name="csrf" value="{{ csrf }}">
+    <button type="submit" name="action" value="start_over" class="danger"
+            data-confirm="Start over? The conversation and the draft are cleared. Nothing in your Sheet or settings changes.">Start over</button>
+  </form>
+</section>
+{% endif %}
+{% endif %}
+{% endblock %}

@@ -11,7 +11,7 @@ from dataclasses import dataclass, field
 from typing import Callable
 
 from app.config import FILL_SOURCES, client_from_dict
-from app.sheet_rules import tab_problems
+from app.sheet_rules import sensitive_columns, tab_problems
 from app.sheets import sheet_error
 
 log = logging.getLogger("setup")
@@ -390,3 +390,21 @@ def summary(done: Applied, changes: dict, config: dict) -> list[str]:
     if persona:
         lines.append(f"Saved {_and(persona)}.")
     return lines
+
+
+def draft_view(sheets, config: dict, draft: dict, sheet_tabs: dict[str, list[str]]) -> dict:
+    """What the draft screen shows beside the draft: how each tab meets the Sheet, rows already there, problems."""
+    try:
+        known = known_questions(sheets, config, sheet_tabs)
+    except Exception:
+        log.exception("setup_knowledge_unreadable")
+        known = set()
+    plans = []
+    for tab in draft["tabs"]:
+        plan = tab_plan(tab["name"], tab["columns"], sheet_tabs)
+        plans.append({**plan, "configured": has_permissions(plan["existing"] or tab["name"], config),
+                      "sensitive": sensitive_columns(plan["headers"])})
+    return {"plans": plans,
+            "system": [{"name": name, **tab_plan(name, columns, sheet_tabs)} for name, columns in system_tabs(config)],
+            "present": [same_question(row["question"]) in known for row in draft["knowledge"]],
+            "problems": check_draft(draft, sheet_tabs, config)}
