@@ -93,7 +93,8 @@ def home(request: Request, scope: Scope, form: Form | None) -> Response:
     return page(request, scope, "business_home.html", title=config["business"],
                 group_status=bot.waha.status(business.number) if business.number else "not linked",
                 replies=bot.store.replies_since(business.id, month_start(bot.clock(), config.get("timezone") or "UTC")),
-                handoffs=handoffs, handoff_error=handoff_error)
+                handoffs=handoffs, handoff_error=handoff_error,
+                setup_card=not config.get("tabs") and request.app.state.registry.setup(business.id)["applied_at"] is None)
 
 
 @screen("/settings", ("GET", "POST"))

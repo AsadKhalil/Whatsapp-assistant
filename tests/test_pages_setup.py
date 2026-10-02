@@ -163,3 +163,14 @@ def test_a_bogus_posted_draft_is_bounded_and_an_unreadable_sheet_blocks_apply():
     site.bot.sheets.fail_tabs = RuntimeError("Google is down")
     page = http.post("/app/setup", data={"csrf": token, "action": "apply", "tab_count": "0", "row_count": "0"}).text
     assert "Google Sheets couldn" in page and site.bot.sheets.written == []
+
+
+def test_home_shows_the_setup_card_until_set_up_and_settings_links_to_it():
+    site = site_with(tabs={})
+    http = site.business_user()
+    assert "Set up your assistant" in http.get("/app").text
+    assert "Guided setup" in http.get("/app/settings").text
+    site.registry.save_setup("acme", [], None)
+    site.registry.setup_applied("acme", actor="t", detail={})
+    assert "Set up your assistant" not in http.get("/app").text
+    assert "Set up your assistant" not in site_with().business_user().get("/app").text  # set up by hand: tabs saved

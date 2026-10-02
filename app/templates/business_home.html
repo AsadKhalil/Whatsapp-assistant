@@ -1,6 +1,14 @@
 {% extends "base.html" %}
 {% block content %}
 {% if not business.active %}<p class="notice error">This business is paused: the bot is not answering anyone.</p>{% endif %}
+{% if setup_card %}
+<section class="setup-phase">
+  <header class="phase-head"><span class="phase-tag">Start here</span><h2>Set up your assistant</h2></header>
+  <p class="muted lede">Answer a few questions and the assistant drafts your Sheet tabs, Knowledge, permissions and
+    how the bot sounds. Nothing changes until you press Apply.</p>
+  <p><a href="{{ base }}/setup">Start guided setup →</a></p>
+</section>
+{% endif %}
 
 {% set official_ok = business.meta_phone_number_id and business.has_meta_token %}
 {% set group_ok = group_status == "WORKING" %}

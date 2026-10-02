@@ -29,6 +29,8 @@ the SQLite connection live in one process.
 `https://$DOMAIN/` is a web dashboard:
 - **Admins** see every business and number: add a business, paste its Meta keys, link purchased numbers by QR code, invite logins, pause a business, and read chats and the audit log.
 - **Each business** logs in to change its bot settings, staff, groups and Sheet permissions, and to read its chats.
+- **Guided setup:** a business owner answers a few questions and the AI drafts their Sheet tabs, Knowledge,
+  permissions and the bot's persona; nothing changes until they press **Apply**, which only adds.
 
 1. Set `SECRET_KEY` in `.env` (`openssl rand -hex 32`). The engine won't start without it. It encrypts the Meta keys stored in the database, so changing it means re-entering them. Every admin also resets their two-step login with `python -m app.cli admin-link` (step 3).
 2. Run `docker compose up -d --build`, then create your admin login: `docker compose exec engine python -m app.cli create-admin you@example.com`. Open the printed link, set a password, and set up two-step login with an authenticator app.

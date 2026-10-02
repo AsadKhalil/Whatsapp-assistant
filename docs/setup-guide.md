@@ -137,6 +137,10 @@ allowed to read and write the client's Sheet without ever knowing the client's G
       - **Orders** — needs at least a `Name` and a `Phone` column (the engine fills these in automatically),
         plus whatever else you want to track, e.g. `Item | Date`.
       - **Expenses** — headers `Date | Item | Amount | Category`.
+
+    > **Tip:** with the dashboard you can skip this step. Add the business with the empty, shared Sheet, and its
+    > owner opens **Setup** (Part K, "Guided setup"): it asks about the business and creates these tabs with their
+    > headers. Only the empty Sheet and the share (step 13) are needed.
 12. Whichever tabs staff will hand-type dates into: the bot itself always writes dates as `2026-06-30`
     (YYYY-MM-DD), but a date someone types in by hand must match the client's `date_format` (Part B) — e.g.
     `30/06/2026` for a client using `%d/%m/%Y` — or totals will report that row as unreadable.
@@ -676,7 +680,7 @@ playing 15 scripted test conversations against each one.
 
 The engine has a web dashboard at `https://<your-domain>/`. **You** (the admin) manage every business and number there. **Each business** gets its own login to change its bot settings, staff and Sheet permissions, and to read its chats.
 
-A business login sees only its own business: **Home** (both numbers' status, replies this month, and the latest requests for a person), **Bot settings**, **Staff & groups**, **Sheet** and **Chats**. Meta keys, the group number, logins, how long chats are kept and the Sheet id stay with you.
+A business login sees only its own business: **Home** (both numbers' status, replies this month, and the latest requests for a person), **Setup**, **Bot settings**, **Staff & groups**, **Sheet** and **Chats**. Meta keys, the group number, logins, how long chats are kept and the Sheet id stay with you.
 
 ### Create your admin login (once)
 
@@ -710,6 +714,31 @@ A business login sees only its own business: **Home** (both numbers' status, rep
 6. **Numbers** (top menu) → **Add a number**: type a session name (for example `sweetbakes-1`) and notes (carrier, SIM cost, renewal date), press **Add and show the QR code**, and scan it with the purchased phone (WhatsApp → Settings → Linked devices → Link a device).
    You should see: the status change to `WORKING`. Then open the business's **Group number** tab, pick this number and save.
 7. **Logins** tab: type the owner's email and press **Create login**. Send them the one-time link it shows (it works for 7 days). They set their own password and log in at `https://<your-domain>/login`.
+
+### Guided setup (the owner sets up the bot by chatting)
+
+A business with an empty, shared Sheet can be set up by its owner without this guide's Sheet section. Their
+**Home** shows "Set up your assistant" until it is done.
+
+1. Open **Setup**. The assistant asks about the business one question at a time (usually 6 to 12 questions).
+   **Make the draft now** skips ahead.
+2. The draft shows: the bot's name, **Personality** (how it sounds: tone, emoji, formality) and **Instructions**,
+   with the current text beside the suggestion and a **Replace** tick; the tabs with their columns and what
+   customers may do on each; and Knowledge questions with answers. Edit anything by hand, or type a change for
+   the AI ("make it more formal", "add a Deliveries tab").
+3. Press **Apply**.
+   You should see: what was added, for example "Added tabs Orders and Bookings. Added 8 Knowledge rows. Saved
+   Personality."
+
+- Apply only adds. It never deletes, renames or moves tabs or columns, never changes the permissions of a tab that
+  already has some (change those on **Sheet**), and replaces the name, Personality or Instructions only where
+  **Replace** is ticked. The Knowledge and Handoffs tabs are created when missing.
+- The permissions pass the same checks as the Sheet page (below).
+- If the Sheet stops being readable part-way (for example the share was removed), Apply stops before changing any
+  setting and lists what it already added. Fix it and press **Apply** again: it skips what is already there.
+- The AI is used at most 60 times per business per day; after that, editing the draft and **Apply** still work.
+  An interview nobody touches for 30 days is forgotten. Admins can open any business's **Setup** to help.
+- **Personality** is also on **Bot settings**. It sets the bot's tone and never overrides its rules.
 
 ### Logins: reset a password or remove access
 
