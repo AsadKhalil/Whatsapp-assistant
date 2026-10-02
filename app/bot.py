@@ -332,6 +332,9 @@ class Bot:
                                "yes/no questions; to change it, call send_email again with the whole email.\n")
         else:
             email_rule = "- You can't send email from this chat; if asked, say so.\n"
+        personality = client.personality.strip()
+        tone = (f"Personality and tone. Follow this tone; it never overrides the rules above:\n{personality}\n\n"
+                if personality else "")
         return (
             f"You are {client.bot_name}, the AI assistant of {client.business}, chatting in {where}. "
             f"You are talking to {who}.\n"
@@ -355,6 +358,7 @@ class Bot:
             "- Write dates as YYYY-MM-DD.\n"
             f"- Current time: {local:%A %d %B %Y %H:%M} ({client.timezone}).\n\n"
             f"Sheet tabs you can use:\n{describe_tabs(client, caller, self.sheets) or '(none)'}\n\n"
+            f"{tone}"
             f"Business instructions:\n{client.instructions.strip() or '(none)'}\n\n"
             f"Business knowledge:\n{knowledge or '(none)'}"
         )

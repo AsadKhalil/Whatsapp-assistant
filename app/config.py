@@ -71,6 +71,7 @@ class Client:
     tabs: dict[str, TabRule]
     timezone: str = "UTC"
     instructions: str = ""
+    personality: str = ""  # how the bot sounds: tone, emoji, formality; never overrides the rules
     knowledge_tab: str = "Knowledge"
     handoff_tab: str = "Handoffs"
     meta_phone_number_id: str | None = None
@@ -124,6 +125,7 @@ def client_from_dict(client_id: str, c: dict) -> Client:
         tabs={tab: _tab_rule(client_id, tab, rule or {}) for tab, rule in (c.get("tabs") or {}).items()},
         timezone=timezone,
         instructions=c.get("instructions") or "",
+        personality=c.get("personality") or "",
         knowledge_tab=c.get("knowledge_tab") or "Knowledge",
         handoff_tab=c.get("handoff_tab") or "Handoffs",
         meta_phone_number_id=str(c["meta_phone_number_id"]) if c.get("meta_phone_number_id") else None,

@@ -86,3 +86,9 @@ def test_new_settings_have_safe_defaults():
     s = Settings()
     assert s.secret_key == "" and s.public_url == ""
     assert s.waha_webhook_url == "http://engine:8000/webhooks/waha"
+
+
+def test_personality_is_optional_and_read_from_settings():
+    raw = {"business": "B", "bot_name": "S", "sheet_id": "s"}
+    assert client_from_dict("x", raw).personality == ""
+    assert client_from_dict("x", {**raw, "personality": "Warm."}).personality == "Warm."

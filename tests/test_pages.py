@@ -75,3 +75,13 @@ def test_business_users_cannot_open_admin_screens_and_admins_can_open_any_busine
     token = csrf(admin, "/admin/b/acme/settings")
     admin.post("/admin/b/acme/settings", data={**SETTINGS_FORM, "retention_days": "30", "csrf": token})
     assert site.bot.clients["acme"].retention_days == 30
+
+
+def test_personality_is_saved_on_settings_above_instructions():
+    site = Site()
+    http = site.business_user()
+    page = http.get("/app/settings").text
+    assert page.index("Personality") < page.index("Instructions for the bot") and "tone, emoji, formality" in page
+    http.post("/app/settings", data={**SETTINGS_FORM, "personality": "Warm, one emoji at most.",
+                                     "csrf": csrf(http, "/app/settings")})
+    assert site.bot.clients["acme"].personality == "Warm, one emoji at most."

@@ -5,6 +5,10 @@
   <input type="hidden" name="csrf" value="{{ csrf }}">
   <label>Business name <input name="business" value="{{ config.business }}" required></label>
   <label>Bot name <input name="bot_name" value="{{ config.bot_name }}" required></label>
+  <label>Personality <small>(optional)</small>
+    <textarea name="personality" rows="3">{{ config.personality or '' }}</textarea>
+    <small>How the bot sounds: tone, emoji, formality, greetings.</small>
+  </label>
   <label>Instructions for the bot <small>(optional)</small>
     <textarea name="instructions" rows="6">{{ config.instructions or '' }}</textarea>
     <small>Tone, opening hours, delivery rules... The bot also reads your Knowledge tab.</small>

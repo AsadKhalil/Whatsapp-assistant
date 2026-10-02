@@ -100,7 +100,7 @@ def settings_page(request: Request, scope: Scope, form: Form | None) -> Response
     config, error = scope.business.config, ""
     if form is not None:
         changes = {"business": form.get("business"), "bot_name": form.get("bot_name"),
-                   "instructions": form.get("instructions"), "timezone": form.get("timezone"),
+                   "personality": form.get("personality"), "instructions": form.get("instructions"), "timezone": form.get("timezone"),
                    "date_format": form.get("date_format") or None}
         if scope.is_admin:
             retention = form.get("retention_days") or "90"

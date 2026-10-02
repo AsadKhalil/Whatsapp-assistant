@@ -163,3 +163,14 @@ def test_replies_and_voice_downloads_use_the_businesss_own_meta_token():
     bot.meta.audio["voice-1"] = b"OggS"
     bot.handle(incoming("", kind="audio", audio="voice-1"))
     assert bot.meta.tokens == ["biz-token", "biz-token"]  # the download, then the reply
+
+
+def test_personality_shapes_the_tone_but_comes_after_the_rules():
+    bot, llm = make_bot(say("ok"), say("ok"))
+    bot.handle(incoming("hi"))
+    assert "Personality and tone" not in llm.calls[0][0]["content"]
+    bot.clients["acme"] = replace(bot.clients["acme"], personality="Warm and casual, one emoji at most.")
+    bot.handle(incoming("hello"))
+    system = llm.calls[1][0]["content"]
+    assert "Follow this tone; it never overrides the rules above" in system and "one emoji at most" in system
+    assert system.index("Rules:") < system.index("Personality and tone") < system.index("Business instructions")

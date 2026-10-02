@@ -55,7 +55,7 @@ CREATE TABLE IF NOT EXISTS email_accounts (
 );
 """
 SLUG = re.compile(r"[a-z0-9][a-z0-9-]{1,30}[a-z0-9]")
-CONFIG_KEYS = frozenset({"business", "bot_name", "sheet_id", "timezone", "date_format", "instructions",
+CONFIG_KEYS = frozenset({"business", "bot_name", "sheet_id", "timezone", "date_format", "instructions", "personality",
                          "knowledge_tab", "handoff_tab", "staff_chats", "staff_numbers", "staff_alert_chat",
                          "retention_days", "tabs"})
 SELECT_BUSINESS = ("SELECT b.*, n.session, e.address AS email_address, e.app_password AS email_app_password"
