@@ -308,6 +308,21 @@ def registry_with_acme(meta: bool = True) -> Registry:
     return registry
 
 
+# A valid propose_setup call for the bakery: one new tab, one existing tab named in another case, two questions
+# (the second is already in bakery_sheets()'s Knowledge tab, spelled differently).
+SETUP_ARGS = {
+    "bot_name": "Mia", "personality": "Warm and casual. One emoji at most.",
+    "instructions": "We deliver within Lahore only.",
+    "tabs": [{"name": "Bookings", "purpose": "Table bookings", "columns": ["Date", "Name", "Phone", "Guests"],
+              "customer": ["own", "append"], "owner_column": "Phone", "name_column": "Name",
+              "phone_column": "Phone"},
+             {"name": "orders", "purpose": "Cake orders", "columns": ["Date", "Item", "Status"],
+              "customer": ["read"]}],
+    "knowledge": [{"question": "What are your hours?", "answer": "Tue-Sun 10am-8pm"},
+                  {"question": " delivery? ", "answer": "Free above Rs 3000"}],
+}
+
+
 class FakeMailer:
     """Records emails instead of sending them; set `fail` to a MailError to make sending fail."""
 
