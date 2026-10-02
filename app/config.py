@@ -85,6 +85,8 @@ class Client:
     meta_verify_token: str = field(default="", repr=False)
     email_address: str = ""  # the business's Gmail address for staff emails (from the dashboard)
     email_app_password: str = field(default="", repr=False)
+    web_search_staff: bool = False  # the bot may search the web for staff
+    web_search_customers: bool = False  # ... and for customers (only together with web_search_staff)
 
 
 def _tab_rule(client_id: str, tab: str, raw: dict) -> TabRule:
@@ -133,6 +135,8 @@ def client_from_dict(client_id: str, c: dict) -> Client:
         staff_alert_chat=c.get("staff_alert_chat") or None,
         retention_days=retention_days,
         date_format=c.get("date_format") or None,
+        web_search_staff=bool(c.get("web_search_staff")),
+        web_search_customers=bool(c.get("web_search_customers")),
     )
 
 

@@ -98,10 +98,15 @@ def home(request: Request, scope: Scope, form: Form | None) -> Response:
 @screen("/settings", ("GET", "POST"))
 def settings_page(request: Request, scope: Scope, form: Form | None) -> Response:
     config, error = scope.business.config, ""
+    web = request.app.state.bot.web
+    web_available = web is not None and web.available
     if form is not None:
         changes = {"business": form.get("business"), "bot_name": form.get("bot_name"),
                    "instructions": form.get("instructions"), "timezone": form.get("timezone"),
                    "date_format": form.get("date_format") or None}
+        if web_available:  # disabled boxes aren't posted, so keep what's saved
+            changes["web_search_staff"] = form.has("web_search_staff")
+            changes["web_search_customers"] = form.has("web_search_staff") and form.has("web_search_customers")
         if scope.is_admin:
             retention = form.get("retention_days") or "90"
             changes["retention_days"] = int(retention) if retention.isdigit() else retention
@@ -116,7 +121,7 @@ def settings_page(request: Request, scope: Scope, form: Form | None) -> Response
                 return redirect(f"{scope.base}/settings?ok=saved")
         config = {**config, **changes}
     return page(request, scope, "settings.html", title="Bot settings", config=config, error=error,
-                timezones=TIMEZONES, date_formats=DATE_FORMATS)
+                timezones=TIMEZONES, date_formats=DATE_FORMATS, web_available=web_available)
 
 
 @screen("/chats")

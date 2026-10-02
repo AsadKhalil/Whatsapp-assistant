@@ -86,3 +86,11 @@ def test_new_settings_have_safe_defaults():
     s = Settings()
     assert s.secret_key == "" and s.public_url == ""
     assert s.waha_webhook_url == "http://engine:8000/webhooks/waha"
+
+
+def test_web_search_switches_default_off_and_are_read_from_settings():
+    base = {"business": "B", "bot_name": "Sara", "sheet_id": "s"}
+    off = client_from_dict("b", base)
+    assert off.web_search_staff is False and off.web_search_customers is False
+    on = client_from_dict("b", {**base, "web_search_staff": True, "web_search_customers": True})
+    assert on.web_search_staff is True and on.web_search_customers is True

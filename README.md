@@ -7,6 +7,7 @@ A WhatsApp AI assistant for small businesses, run for many businesses from one s
   staff rows are saved at once.
 - **Voice notes** are transcribed.
 - **Email:** staff can ask the bot to email someone from the business's Gmail; it shows the email and sends it only after they reply YES (set up on the business's **Email** page).
+- **Web search:** when the Sheet and Knowledge don't have the answer, the bot can search the web through the AI provider's own search; off by default, switched on per business on **Settings** for staff, and optionally customers (general facts only).
 
 Design: `docs/superpowers/specs/2026-09-23-whatsapp-engine-design.md` (engine) and `docs/superpowers/specs/2026-09-28-dashboard-admin-design.md` (dashboard).
 
