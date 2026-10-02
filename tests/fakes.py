@@ -40,6 +40,11 @@ def make_client(**overrides) -> Client:
     return Client(**fields)
 
 
+class Forbidden(Exception):
+    """What Google raises when the Sheet is no longer shared with the robot account."""
+    code = 403
+
+
 class FakeSheets:
     def __init__(self, tabs: dict[str, list[dict]], headers: dict[str, list[str]] | None = None) -> None:
         self.tabs = {name: [dict(r) for r in rows] for name, rows in tabs.items()}
@@ -47,6 +52,8 @@ class FakeSheets:
         self.appended: list[tuple[str, dict]] = []
         self.fail_append = False
         self.fail_tabs: Exception | None = None  # raised by tab_headers, like an unshared or deleted Sheet
+        self.written: list[tuple] = []  # add_tab / add_columns / append_rows calls, in order
+        self.fail_writes: set[str] = set()  # tabs whose writes raise Forbidden
 
     def rows(self, sheet_id: str, tab: str) -> list[dict]:
         return [dict(r) for r in self.tabs[tab]]  # KeyError for a missing tab, like a renamed sheet
@@ -66,6 +73,24 @@ class FakeSheets:
             raise RuntimeError("Sheets is down")
         self.appended.append((tab, dict(row)))
         self.tabs.setdefault(tab, []).append(dict(row))
+
+    def _write(self, kind: str, tab: str, value) -> None:
+        if tab in self.fail_writes:
+            raise Forbidden(tab)
+        self.written.append((kind, tab, value))
+
+    def add_tab(self, sheet_id: str, tab: str, headers: list[str]) -> None:
+        self._write("add_tab", tab, list(headers))
+        self.tabs[tab] = []
+        self._headers[tab] = list(headers)
+
+    def add_columns(self, sheet_id: str, tab: str, columns: list[str]) -> None:
+        self._write("add_columns", tab, list(columns))
+        self._headers[tab] = self.headers(sheet_id, tab) + list(columns)
+
+    def append_rows(self, sheet_id: str, tab: str, rows: list[dict[str, str]]) -> None:
+        self._write("append_rows", tab, [dict(r) for r in rows])
+        self.tabs[tab].extend(dict(r) for r in rows)
 
     def knowledge(self, sheet_id: str, tab: str, now: float | None = None) -> str:
         return "\n".join(" | ".join(f"{k}: {v}" for k, v in r.items()) for r in self.tabs.get(tab, []))

@@ -8,9 +8,11 @@ STAFF = Caller("staff", False, "Bilal", "923001111111")
 
 
 class FakeWorksheet:
-    def __init__(self, values):
+    def __init__(self, values, col_count=26):
         self.values = values  # first row is the header
+        self.col_count = col_count
         self.appended = []
+        self.writes = []  # value_input_option of every update and append_rows
 
     def get_all_records(self):
         head, *body = self.values
@@ -21,6 +23,18 @@ class FakeWorksheet:
 
     def append_row(self, row, value_input_option):
         self.appended.append((row, value_input_option))
+
+    def update(self, values, range_name, value_input_option):
+        row, col = gspread.utils.a1_to_rowcol(range_name)
+        self.values[row - 1][col - 1:] = values[0]
+        self.writes.append(value_input_option)
+
+    def add_cols(self, cols):
+        self.col_count += cols
+
+    def append_rows(self, values, value_input_option):
+        self.values.extend(values)
+        self.writes.append(value_input_option)
 
 
 class FakeBook:
@@ -34,6 +48,12 @@ class FakeBook:
 
     def worksheets(self):
         return list(self.tabs.values())
+
+    def add_worksheet(self, title, rows, cols):
+        ws = FakeWorksheet([[]], col_count=cols)
+        ws.title = title
+        self.tabs[title] = ws
+        return ws
 
 
 class FakeGC:
@@ -97,6 +117,33 @@ def test_blank_middle_rows_are_dropped_before_counting():
 def test_tab_headers_list_every_tab_with_its_trimmed_header_row():
     sheets = Sheets(FakeGC({"Prices": FakeWorksheet([["Item ", "Price"]]), "Empty": FakeWorksheet([[]])}))
     assert sheets.tab_headers("s") == {"Prices": ["Item", "Price"], "Empty": []}
+
+
+def test_a_new_tab_gets_its_header_row_as_typed():
+    gc = FakeGC({})
+    Sheets(gc).add_tab("s", "Orders", ["Date", "=Name"])
+    ws = gc.book.tabs["Orders"]
+    assert ws.values == [["Date", "=Name"]] and ws.writes == ["RAW"] and ws.col_count == 26
+
+
+def test_new_columns_go_after_the_last_header_cell_widening_the_tab():
+    ws = FakeWorksheet([["Date", "", "Item"], ["2026-06-01", "x", "Cake"]], col_count=4)
+    sheets = Sheets(FakeGC({"Orders": ws}))
+    assert sheets.headers("s", "Orders", now=0) == ["Date", "", "Item"]
+    sheets.add_columns("s", "Orders", ["Status", "=Notes"])
+    assert ws.values == [["Date", "", "Item", "Status", "=Notes"], ["2026-06-01", "x", "Cake"]]
+    assert ws.col_count == 5 and ws.writes == ["RAW"]
+    assert sheets.headers("s", "Orders", now=1) == ["Date", "", "Item", "Status", "=Notes"]  # cache dropped
+
+
+def test_knowledge_rows_go_in_one_call_matched_by_header_ignoring_case():
+    ws = FakeWorksheet([["question", "Answer "], ["Hours?", "9-5"]])
+    sheets = Sheets(FakeGC({"Knowledge": ws}))
+    assert "Lahore" not in sheets.knowledge("s", "Knowledge", now=0)
+    sheets.append_rows("s", "Knowledge", [{"Question": "=1+1", "Answer": "Two"},
+                                          {"Question": "Where?", "Answer": "Lahore"}])
+    assert ws.values[2:] == [["=1+1", "Two"], ["Where?", "Lahore"]] and ws.writes == ["RAW"]
+    assert "Lahore" in sheets.knowledge("s", "Knowledge", now=1)  # cache dropped
 
 
 def test_service_account_email_and_friendly_sheet_errors(tmp_path):

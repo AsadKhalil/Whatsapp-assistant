@@ -53,6 +53,38 @@ class Sheets:
         ws.append_row([row.get(h, "") for h in headers], value_input_option="RAW")
         self._cache.pop(("headers", sheet_id, tab), None)  # a renamed column converges on the next read
 
+    def add_tab(self, sheet_id: str, tab: str, headers: list[str]) -> None:
+        """A new tab whose first row is `headers`, stored as typed."""
+        ws = self._gc.open_by_key(sheet_id).add_worksheet(tab, rows=1000, cols=max(26, len(headers)))
+        ws.update([headers], "A1", value_input_option="RAW")
+        self._forget(sheet_id, tab)
+
+    def add_columns(self, sheet_id: str, tab: str, columns: list[str]) -> None:
+        """Write `columns` after the last header cell, widening the tab if needed; no existing cell changes."""
+        ws = self._gc.open_by_key(sheet_id).worksheet(tab)  # fresh: a cached tab's size may be out of date
+        start = len(ws.row_values(1)) + 1
+        end = start + len(columns) - 1
+        if ws.col_count < end:
+            ws.add_cols(end - ws.col_count)
+        ws.update([columns], gspread.utils.rowcol_to_a1(1, start), value_input_option="RAW")
+        self._forget(sheet_id, tab)
+
+    def append_rows(self, sheet_id: str, tab: str, rows: list[dict[str, str]]) -> None:
+        """Many rows in one call, matched to the headers ignoring case and spaces, stored as typed."""
+        ws = self._tab(sheet_id, tab)
+        headers = [h.strip().casefold() for h in ws.row_values(1)]
+        values = []
+        for row in rows:
+            by_header = {k.strip().casefold(): v for k, v in row.items()}
+            values.append([by_header.get(h, "") for h in headers])
+        ws.append_rows(values, value_input_option="RAW")
+        self._forget(sheet_id, tab)
+
+    def _forget(self, sheet_id: str, tab: str) -> None:
+        """Drop what's cached about a tab after changing it."""
+        for kind in ("headers", "knowledge"):
+            self._cache.pop((kind, sheet_id, tab), None)
+
     def knowledge(self, sheet_id: str, tab: str, now: float | None = None) -> str:
         def load() -> str:
             lines = (" | ".join(f"{k}: {v}" for k, v in r.items() if str(v).strip())
