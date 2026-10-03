@@ -1,7 +1,8 @@
 import pytest
 
-from app.guided_setup import (AI_DOWN, DRAFT_NOW, MADE_DRAFT, REMINDER, SetupError, apply_sheet, check_draft,
-                              draft_from_args, replace_ticks, setup_changes, summary, tab_plan, take_turn)
+from app.guided_setup import (AI_DOWN, DRAFT_NOW, MADE_DRAFT, REMINDER, Applied, SetupError, apply_sheet,
+                              check_draft, draft_from_args, replace_ticks, setup_changes, summary, tab_plan,
+                              take_turn)
 from tests.fakes import SETUP_ARGS, FakeSheets, ScriptedLLM, acme_config, bakery_sheets, call, say
 
 # A proposal that always fails the checks: a new tab whose name Google refuses.
@@ -203,6 +204,11 @@ def test_a_contact_column_added_to_a_tab_customers_read_needs_the_tick():
     assert check_draft(draft(tabs=[{**prices, "confirmed": True}]), sheet_tabs(), acme_config()) == []
     orders = a_tab("Orders", columns=["Supplier phone"])  # customers see only their own Orders rows
     assert check_draft(draft(tabs=[orders]), sheet_tabs(), acme_config()) == []
+
+
+def test_summary_claims_only_persona_that_actually_changed():
+    assert summary(Applied(), {"bot_name": "Mia"}, {"bot_name": "Mia"}) == []
+    assert summary(Applied(), {"bot_name": "Mia"}, {"bot_name": "Sara"}) == ["Saved Bot name."]
 
 
 def test_apply_adds_only_what_is_missing_and_skips_known_questions():

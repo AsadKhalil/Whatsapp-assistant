@@ -277,7 +277,8 @@ def setup_prompt(config: dict, sheet_tabs: dict[str, list[str]] | None, draft: d
         f"You are helping the owner of {config['business']} set up {config.get('bot_name') or 'the assistant'}, "
         "the business's WhatsApp AI assistant. The screen already greeted them and asked what the business does.\n"
         "Rules:\n"
-        "- Ask one short question at a time, in the owner's language. About 6 to 12 questions in total.\n"
+        "- Ask one short question at a time, in the language the owner writes to you in. About 6 to 12 questions "
+        "in total.\n"
         "- Cover: what the business sells or does; what customers ask about; what should be recorded (orders, "
         "bookings, leads, expenses...) and which details each needs; what customers may look up (only their own "
         "orders? a price list?); hours, location, prices and policies; the bot's name and tone.\n"
@@ -287,7 +288,9 @@ def setup_prompt(config: dict, sheet_tabs: dict[str, list[str]] | None, draft: d
         "messages the bot can be told everything in it.\n"
         f"- Don't propose the {knowledge} or {handoffs} tabs: setup adds them by itself.\n"
         "- Build on what exists: keep existing tab names and columns.\n"
-        "- When you know enough, or the owner asks for the draft, call propose_setup with the whole draft.\n\n"
+        "- When you know enough, or the owner asks for the draft, call propose_setup with the whole draft: keep "
+        "every tab and Knowledge row of the current draft unless the owner asked to change it, and use the bot "
+        "name the owner chose.\n\n"
         f"The Sheet's tabs now:\n{tabs}\n\n"
         f"The current settings:\n{current}"
     )
@@ -422,7 +425,8 @@ def summary(done: Applied, changes: dict, config: dict) -> list[str]:
     permitted = [tab for tab in changes.get("tabs", {}) if tab not in (config.get("tabs") or {})]
     if permitted:
         lines.append(f"Saved permissions for {_and(permitted)}.")
-    persona = [LABELS[key] for key in PERSONA if key in changes]
+    persona = [LABELS[key] for key in PERSONA
+               if key in changes and str(changes[key]) != str(config.get(key) or "")]
     if persona:
         lines.append(f"Saved {_and(persona)}.")
     return lines

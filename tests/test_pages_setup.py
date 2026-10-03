@@ -53,6 +53,23 @@ def test_the_interview_asks_one_question_at_a_time_then_shows_the_draft():
     assert [m["role"] for m in site.registry.setup("acme")["messages"]] == ["user", "assistant", "user", "assistant"]
 
 
+def test_a_post_without_the_screens_fields_applies_the_stored_draft_not_an_empty_one():
+    site = site_with()
+    stored_draft(site)
+    http = site.business_user()
+    page = http.post("/app/setup", data={"csrf": csrf(http, "/app/setup"), "action": "apply"}).text
+    assert "Added tab Bookings." in page and "Added 1 Knowledge row." in page
+    assert site.bot.clients["acme"].tabs["Bookings"].customer == {"own", "append"}
+
+
+def test_apply_with_no_draft_says_so_and_changes_nothing():
+    site = site_with()
+    http = site.business_user()
+    page = http.post("/app/setup", data={"csrf": csrf(http, "/app/setup"), "action": "apply"}).text
+    assert "no draft to apply yet" in page
+    assert site.bot.sheets.written == []
+
+
 def test_apply_adds_only_and_saves_only_the_ticked_settings():
     site = site_with()
     draft = stored_draft(site)

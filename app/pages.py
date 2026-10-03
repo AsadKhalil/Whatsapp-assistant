@@ -367,7 +367,9 @@ def setup_page(request: Request, scope: Scope, form: Form | None) -> Response:
         registry.save_setup(business.id, [], None)
         return redirect(f"{scope.base}/setup")
     if action in ("save", "back", "change", "apply"):  # every post from the draft screen keeps the hand edits
-        draft, view = draft_from_form(form), "draft"
+        if form.has("tab_count"):  # a post without the screen's fields (double submit, hand-made) edits nothing
+            draft = draft_from_form(form)
+        view = "draft" if draft is not None else "chat"
         registry.save_setup(business.id, messages, draft)
         if action == "save":
             return redirect(f"{scope.base}/setup")
@@ -399,7 +401,9 @@ def setup_page(request: Request, scope: Scope, form: Form | None) -> Response:
                 registry.save_setup(business.id, turn.messages, turn.draft or draft)
                 return redirect(f"{scope.base}/setup" + ("" if turn.draft else "?view=chat#reply"))
     elif action == "apply":
-        if sheet_problem:
+        if draft is None:
+            error = "There is no draft to apply yet: answer the questions, then press Make the draft now."
+        elif sheet_problem:
             error = sheet_problem
         elif guided_setup.check_draft(draft, sheet_tabs, config):
             error = "Fix the problems marked below, then press Apply again."
