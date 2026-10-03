@@ -6,7 +6,7 @@
   {% if refresh %}<meta http-equiv="refresh" content="{{ refresh }}">{% endif %}
   <title>{{ title }} · WhatsApp Assistant</title>
   <link rel="stylesheet" href="/static/pico.min.css">
-  <link rel="stylesheet" href="/static/app.css?v=12">
+  <link rel="stylesheet" href="/static/app.css?v=13">
 </head>
 <body>
 <a class="skip-link" href="#main">Skip to content</a>
@@ -36,6 +36,9 @@
     <li><a href="{{ base }}/settings">Bot settings</a></li>
     <li><a href="{{ base }}/staff">Staff &amp; groups</a></li>
     <li><a href="{{ base }}/sheet">Sheet</a></li>
+    {% if business.config.sheet_id %}
+    <li><a class="ext" href="https://docs.google.com/spreadsheets/d/{{ business.config.sheet_id }}/edit" target="_blank" rel="noopener" aria-label="Open the Google Sheet in a new tab">↗</a></li>
+    {% endif %}
     <li><a href="{{ base }}/chats">Chats</a></li>
     <li><a href="{{ base }}/email">Email</a></li>
     {% if is_admin %}

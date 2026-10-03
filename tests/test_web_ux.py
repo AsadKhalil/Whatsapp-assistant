@@ -61,6 +61,15 @@ def test_staff_table_controls_are_named_for_screen_readers():
     assert 'aria-label="No alerts"' in page
 
 
+def test_the_google_sheet_opens_from_the_nav_and_the_sheet_page():
+    site = Site()
+    user = site.business_user()
+    url = "https://docs.google.com/spreadsheets/d/sheet-1/edit"
+    assert f'class="ext" href="{url}"' in user.get("/app").text
+    sheet = user.get("/app/sheet").text
+    assert f'class="h1-ext" href="{url}"' in sheet and "Open Google Sheet" in sheet
+
+
 def test_sheet_preview_returns_to_its_tab_and_problems_show_at_the_tab():
     site = Site()
     http = site.business_user()

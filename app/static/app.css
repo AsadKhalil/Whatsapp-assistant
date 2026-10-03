@@ -111,6 +111,9 @@ nav.tabs a {
 }
 nav.tabs a:hover { color: var(--ink); background: var(--surface-2); text-decoration: none; }
 nav.tabs a[aria-current="page"] { color: var(--ok-ink); background: var(--accent-soft); }
+nav.tabs a.ext { padding: 0.35rem 0.55rem; font-weight: 500; opacity: 0.75; }
+nav.tabs a.ext:hover { opacity: 1; }
+h1 a.h1-ext { font-size: 0.85rem; font-weight: 500; margin-left: 0.6rem; text-decoration: none; white-space: nowrap; }
 
 /* Cards */
 main > article, article {

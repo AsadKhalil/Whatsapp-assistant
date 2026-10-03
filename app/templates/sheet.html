@@ -1,6 +1,6 @@
 {% extends "base.html" %}
 {% block content %}
-<h1>Sheet &amp; permissions</h1>
+<h1>Sheet &amp; permissions{% if config.sheet_id %} <a class="h1-ext" href="https://docs.google.com/spreadsheets/d/{{ config.sheet_id }}/edit" target="_blank" rel="noopener">Open Google Sheet ↗</a>{% endif %}</h1>
 <p>Share the Google Sheet, as <em>Editor</em>, with:</p>
 <div class="share-row"><code>{{ email or "the service account (ask your admin for the address)" }}</code>
   {% if email %}<button type="button" class="copy-btn" data-copy="{{ email }}">Copy</button>{% endif %}</div>
