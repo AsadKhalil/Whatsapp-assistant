@@ -142,6 +142,35 @@ def draft_from_args(args: dict, config: dict) -> dict:
             "tabs": tabs, "knowledge": [row for row in knowledge if row["question"] or row["answer"]]}
 
 
+def merged_draft(new: dict, current: dict) -> dict:
+    """A re-proposal on top of a draft the owner has seen: nothing disappears.
+
+    The AI rewrites the whole draft on every proposal and can quietly drop tabs, columns or
+    Knowledge rows the owner already approved. Matched by name (tabs) or question (rows):
+    what the proposal repeats it may update, what it leaves out is kept as it is, and what
+    the owner unticked or removed stays out. Only the draft screen's boxes remove things.
+    """
+    tabs = []
+    for tab in new["tabs"]:
+        old = next((t for t in current["tabs"] if t["name"].casefold() == tab["name"].casefold()), None)
+        if old is None:
+            tabs.append(tab)
+            continue
+        have = {c.casefold() for c in tab["columns"]}
+        tabs.append({**tab, "columns": tab["columns"] + [c for c in old["columns"] if c.casefold() not in have],
+                     "use": tab["use"] and old["use"], "confirmed": tab["confirmed"] or old["confirmed"]})
+    for tab in current["tabs"]:
+        if not any(t["name"].casefold() == tab["name"].casefold() for t in tabs):
+            tabs.append(tab)
+    dropped = {same_question(row["question"]) for row in current["knowledge"] if not row["keep"]}
+    proposed = {same_question(row["question"]) for row in new["knowledge"] if row["question"]}
+    rows = [{**row, "keep": False} if same_question(row["question"]) in dropped else row
+            for row in new["knowledge"] if row["question"]]
+    rows += [row for row in current["knowledge"]
+             if row["keep"] and row["question"] and same_question(row["question"]) not in proposed]
+    return {**new, "tabs": tabs, "knowledge": rows}
+
+
 def system_tabs(config: dict) -> list[tuple[str, list[str]]]:
     """The Knowledge and Handoffs tabs, under the business's names for them, with the columns the bot uses."""
     return [(config.get("knowledge_tab") or "Knowledge", KNOWLEDGE_COLUMNS),
@@ -277,8 +306,8 @@ def setup_prompt(config: dict, sheet_tabs: dict[str, list[str]] | None, draft: d
         f"You are helping the owner of {config['business']} set up {config.get('bot_name') or 'the assistant'}, "
         "the business's WhatsApp AI assistant. The screen already greeted them and asked what the business does.\n"
         "Rules:\n"
-        "- Ask one short question at a time, in the language the owner writes to you in. About 6 to 12 questions "
-        "in total.\n"
+        "- Ask one short question at a time, in the language and script the owner writes in (English to English). "
+        "About 6 to 12 questions in total.\n"
         "- Cover: what the business sells or does; what customers ask about; what should be recorded (orders, "
         "bookings, leads, expenses...) and which details each needs; what customers may look up (only their own "
         "orders? a price list?); hours, location, prices and policies; the bot's name and tone.\n"
@@ -288,9 +317,9 @@ def setup_prompt(config: dict, sheet_tabs: dict[str, list[str]] | None, draft: d
         "messages the bot can be told everything in it.\n"
         f"- Don't propose the {knowledge} or {handoffs} tabs: setup adds them by itself.\n"
         "- Build on what exists: keep existing tab names and columns.\n"
-        "- When you know enough, or the owner asks for the draft, call propose_setup with the whole draft: keep "
-        "every tab and Knowledge row of the current draft unless the owner asked to change it, and use the bot "
-        "name the owner chose.\n\n"
+        "- Ask about everything in the list above before you propose; don't rush to a draft. When you know enough, "
+        "or the owner asks for one, call propose_setup with the whole draft and the bot name the owner chose — "
+        "anything you leave out of the current draft is kept as it is.\n\n"
         f"The Sheet's tabs now:\n{tabs}\n\n"
         f"The current settings:\n{current}"
     )
@@ -338,6 +367,8 @@ def take_turn(llm, spend: Callable[[], bool], business_id: str, config: dict,
             log.info("setup_turn business=%s outcome=question", business_id)
             return Turn([*convo, {"role": "assistant", "content": reply.text}])
         new = draft_from_args(proposal.arguments, config)
+        if draft is not None:
+            new = merged_draft(new, draft)
         problems = check_draft(new, sheet_tabs or {}, config)
         if problems and not retried:
             retried = True

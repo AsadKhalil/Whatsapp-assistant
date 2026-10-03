@@ -1,8 +1,8 @@
 import pytest
 
 from app.guided_setup import (AI_DOWN, DRAFT_NOW, MADE_DRAFT, REMINDER, Applied, SetupError, apply_sheet,
-                              check_draft, draft_from_args, replace_ticks, setup_changes, summary, tab_plan,
-                              take_turn)
+                              check_draft, draft_from_args, merged_draft, replace_ticks, same_question,
+                              setup_changes, summary, tab_plan, take_turn)
 from tests.fakes import SETUP_ARGS, FakeSheets, ScriptedLLM, acme_config, bakery_sheets, call, say
 
 # A proposal that always fails the checks: a new tab whose name Google refuses.
@@ -135,6 +135,39 @@ def test_a_proposal_is_checked_and_becomes_the_draft():
     assert t.draft["bot_name"] == "Mia" and t.problems == []
 
 
+def test_a_reproposal_on_a_seen_draft_cannot_drop_its_tabs_or_rows():
+    current = draft()
+    slimmer = ScriptedLLM(call("propose_setup", **{**SETUP_ARGS, "tabs": SETUP_ARGS["tabs"][:1],
+                                                   "knowledge": SETUP_ARGS["knowledge"][:1]}))
+    t = turn(slimmer, current=current, text="Add a Deliveries tab", want_draft=True)
+    assert [tab["name"] for tab in t.draft["tabs"]] == [tab["name"] for tab in current["tabs"]]
+    assert len(t.draft["knowledge"]) == len(current["knowledge"])
+
+
+def test_a_reproposal_unions_columns_and_respects_the_owners_unticks():
+    current = draft()
+    bookings = current["tabs"][0]
+    current["tabs"][0] = {**bookings, "use": False, "confirmed": True}
+    current["knowledge"][0]["keep"] = False  # the owner removed this row on the draft screen
+    again = draft(tabs=[{**bookings, "columns": ["Date", "Guests"]}])
+    merged = merged_draft(again, current)
+    assert merged["tabs"][0]["columns"] == ["Date", "Guests", "Name", "Phone"]  # nothing dropped
+    assert merged["tabs"][0]["use"] is False and merged["tabs"][0]["confirmed"] is True
+    kept = {same_question(row["question"]): row["keep"] for row in merged["knowledge"]}
+    assert kept[same_question(current["knowledge"][0]["question"])] is False  # still removed
+    assert len(merged["knowledge"]) == len(current["knowledge"])  # the other rows stay
+
+
+def test_a_repeated_question_takes_the_new_answer_without_duplicating():
+    current = draft()
+    again = draft()
+    again["knowledge"][0]["answer"] = "Fresh answer"
+    merged = merged_draft(again, current)
+    row = next(r for r in merged["knowledge"]
+               if same_question(r["question"]) == same_question(current["knowledge"][0]["question"]))
+    assert row["answer"] == "Fresh answer" and len(merged["knowledge"]) == len(current["knowledge"])
+
+
 def test_a_failing_draft_goes_back_once_then_is_shown_with_its_problems():
     llm, budget = ScriptedLLM(call("propose_setup", **BAD_ARGS), call("propose_setup", **BAD_ARGS)), Budget()
     t = turn(llm, budget)
@@ -155,7 +188,8 @@ def test_a_draft_request_answered_in_text_gets_one_reminder():
 
 def test_the_current_draft_and_its_problems_go_to_the_ai():
     current = draft(tabs=[a_tab("Bad/Name")])
-    llm = ScriptedLLM(call("propose_setup", **SETUP_ARGS))
+    # the proposal resurrects the bad tab, so it is checked again and gets one retry
+    llm = ScriptedLLM(call("propose_setup", **SETUP_ARGS), call("propose_setup", **SETUP_ARGS))
     turn(llm, current=current, text="Make it formal", want_draft=True)
     system = llm.calls[0][0]["content"]
     assert '"name": "Bad/Name"' in system and "Bad/Name: a tab name can't contain" in system
