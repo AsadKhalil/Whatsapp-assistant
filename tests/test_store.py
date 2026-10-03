@@ -102,3 +102,15 @@ def test_maintenance_forgets_expired_pending_emails_and_old_email_counts():
     s.purge_expired_pending(now=200_000.0)
     assert s.get_pending_email("acme", "c", "u", now=50.0) is None  # gone from the table
     assert s.emails_sent_since("acme", 0.0) == 1  # counts older than two days are dropped
+
+
+def test_web_searches_are_counted_per_business_and_chat_and_old_counts_purged():
+    s = Store(":memory:")
+    s.record_web_search("acme", "c1", at=100.0)
+    s.record_web_search("acme", "c2", at=200.0)
+    s.record_web_search("other", "c1", at=200.0)
+    assert s.web_searches_since("acme", 0.0) == 2
+    assert s.web_searches_since("acme", 0.0, chat_id="c1") == 1
+    assert s.web_searches_since("acme", 150.0) == 1
+    s.purge_expired_pending(now=100.0 + 2 * 86_400 + 50)
+    assert s.web_searches_since("acme", 0.0) == 1  # counts older than two days are dropped

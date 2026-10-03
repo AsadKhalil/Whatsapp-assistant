@@ -774,6 +774,25 @@ Limits: one recipient per email, plain text only (no attachments), at most 50 em
 request, the preview and the "✅ Email sent" reply stay in the business's **Chats**, as the record of what was
 sent. **Remove email** on the same page switches it off.
 
+### Let the bot search the web (optional)
+
+When the Sheet and the Knowledge tab don't have the answer, the bot can search the web, using your AI provider's
+own search and the `LLM_API_KEY` already in `.env` (no new account). It works with OpenAI, Gemini and Ollama
+Cloud; with any other `LLM_BASE_URL` the switches are greyed out.
+
+1. Open the business → **Settings** → **Web search**.
+2. Tick **Staff can ask the bot to search the web**. Tick **Customers too** only if customers should get it as
+   well (it needs the staff switch on).
+3. Press **Save**.
+4. From a staff phone, ask the bot something only the web knows, like "what's PIA's helpline number?".
+   You should see: an answer that names the website it came from, with a link.
+
+For customers the bot is strict: the web is only for general facts like directions or public holidays, never the
+business's own prices, stock, orders, hours or policies (those come only from the Sheet and Knowledge), and never
+other businesses. Limits: 2 searches per message, 10 per customer chat and 100 per business a day. Each search
+costs money on your AI provider's bill (Gemini lists about $35 per 1,000 searches; check your provider's
+pricing).
+
 ### The Sheet page's safety checks
 
 - A tab can only get permissions if it exists in the Sheet. "See their own rows" needs an owner column (the column holding the customer's phone number), and the columns picked for the customer's name and phone must be real columns of that tab.

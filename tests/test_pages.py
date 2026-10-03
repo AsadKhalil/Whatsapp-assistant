@@ -85,3 +85,31 @@ def test_personality_is_saved_on_settings_above_instructions():
     http.post("/app/settings", data={**SETTINGS_FORM, "personality": "Warm, one emoji at most.",
                                      "csrf": csrf(http, "/app/settings")})
     assert site.bot.clients["acme"].personality == "Warm, one emoji at most."
+
+
+def test_web_search_ticks_save_and_customers_need_the_staff_tick():
+    site = Site()
+    http = site.business_user()
+    token = csrf(http, "/app/settings")
+    assert 'name="web_search_staff"' in http.get("/app/settings").text
+    http.post("/app/settings", data={**SETTINGS_FORM, "web_search_customers": "on", "csrf": token})
+    client = site.bot.clients["acme"]
+    assert client.web_search_staff is False and client.web_search_customers is False
+    http.post("/app/settings", data={**SETTINGS_FORM, "web_search_staff": "on", "web_search_customers": "on",
+                                     "csrf": token})
+    client = site.bot.clients["acme"]
+    assert client.web_search_staff is True and client.web_search_customers is True
+    http.post("/app/settings", data={**SETTINGS_FORM, "csrf": token})
+    assert site.bot.clients["acme"].web_search_staff is False
+
+
+def test_web_search_ticks_are_disabled_and_kept_when_the_provider_cant_search():
+    site = Site()
+    http = site.business_user()
+    token = csrf(http, "/app/settings")
+    http.post("/app/settings", data={**SETTINGS_FORM, "web_search_staff": "on", "csrf": token})
+    site.bot.web.available = False
+    page = http.get("/app/settings").text
+    assert "can't search the web" in page and 'name="web_search_staff" disabled' in page
+    http.post("/app/settings", data={**SETTINGS_FORM, "csrf": token})  # disabled boxes aren't sent
+    assert site.bot.clients["acme"].web_search_staff is True

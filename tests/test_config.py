@@ -92,3 +92,11 @@ def test_personality_is_optional_and_read_from_settings():
     raw = {"business": "B", "bot_name": "S", "sheet_id": "s"}
     assert client_from_dict("x", raw).personality == ""
     assert client_from_dict("x", {**raw, "personality": "Warm."}).personality == "Warm."
+
+
+def test_web_search_switches_default_off_and_are_read_from_settings():
+    base = {"business": "B", "bot_name": "Sara", "sheet_id": "s"}
+    off = client_from_dict("b", base)
+    assert off.web_search_staff is False and off.web_search_customers is False
+    on = client_from_dict("b", {**base, "web_search_staff": True, "web_search_customers": True})
+    assert on.web_search_staff is True and on.web_search_customers is True

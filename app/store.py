@@ -43,6 +43,12 @@ CREATE TABLE IF NOT EXISTS emails_sent (
   at REAL NOT NULL
 );
 CREATE INDEX IF NOT EXISTS emails_sent_by_client ON emails_sent (client_id, at);
+CREATE TABLE IF NOT EXISTS web_searches (
+  client_id TEXT NOT NULL,
+  chat_id TEXT NOT NULL,
+  at REAL NOT NULL
+);
+CREATE INDEX IF NOT EXISTS web_searches_by_client ON web_searches (client_id, at);
 """
 
 
@@ -146,10 +152,21 @@ class Store:
         return self._all("SELECT COUNT(*) AS n FROM emails_sent WHERE client_id = ? AND at >= ?",
                          (client_id, since))[0]["n"]
 
+    def record_web_search(self, client_id: str, chat_id: str, at: float) -> None:
+        self._write("INSERT INTO web_searches (client_id, chat_id, at) VALUES (?, ?, ?)", (client_id, chat_id, at))
+
+    def web_searches_since(self, client_id: str, since: float, chat_id: str | None = None) -> int:
+        """Searches by this business since `since`, in one chat when `chat_id` is given."""
+        sql, params = "SELECT COUNT(*) AS n FROM web_searches WHERE client_id = ? AND at >= ?", [client_id, since]
+        if chat_id is not None:
+            sql, params = sql + " AND chat_id = ?", [*params, chat_id]
+        return self._all(sql, tuple(params))[0]["n"]
+
     def purge_expired_pending(self, now: float) -> int:
-        """Drop pending rows and emails nobody confirmed, and email counts older than two days."""
+        """Drop pending rows and emails nobody confirmed, and email and search counts older than two days."""
         self._write("DELETE FROM pending_emails WHERE expires_at <= ?", (now,))
         self._write("DELETE FROM emails_sent WHERE at < ?", (now - 2 * 86_400,))
+        self._write("DELETE FROM web_searches WHERE at < ?", (now - 2 * 86_400,))
         return self._write("DELETE FROM pending_writes WHERE expires_at <= ?", (now,))
 
     def delete_older_than(self, client_id: str, cutoff: float) -> int:

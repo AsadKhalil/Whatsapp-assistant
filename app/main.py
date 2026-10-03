@@ -25,6 +25,7 @@ from app.registry import Registry
 from app.sheets import Sheets
 from app.store import Store
 from app.vault import Vault
+from app.websearch import WebSearch
 from app.whatsapp import (GroupJoin, MetaClient, WahaClient, parse_meta, parse_waha, verify_meta_signature,
                           verify_waha_hmac)
 
@@ -45,6 +46,7 @@ def build_bot(settings: Settings, clients: dict[str, Client]) -> Bot:
         clients=clients,
         log_key=settings.log_hash_key,
         mailer=Mailer(),
+        web=WebSearch(settings),
     )
 
 

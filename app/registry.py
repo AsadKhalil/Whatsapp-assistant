@@ -66,7 +66,7 @@ CREATE TABLE IF NOT EXISTS setups (
 SLUG = re.compile(r"[a-z0-9][a-z0-9-]{1,30}[a-z0-9]")
 CONFIG_KEYS = frozenset({"business", "bot_name", "sheet_id", "timezone", "date_format", "instructions", "personality",
                          "knowledge_tab", "handoff_tab", "staff_chats", "staff_numbers", "staff_alert_chat",
-                         "retention_days", "tabs"})
+                         "retention_days", "tabs", "web_search_staff", "web_search_customers"})
 SELECT_BUSINESS = ("SELECT b.*, n.session, e.address AS email_address, e.app_password AS email_app_password"
                    " FROM businesses b LEFT JOIN numbers n ON n.business_id = b.id"
                    " LEFT JOIN email_accounts e ON e.business_id = b.id")
